@@ -1,0 +1,21 @@
+FROM python:3.12
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+RUN uv sync
+
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+COPY sn38/ sn38/
+COPY entrypoint.sh /app/entrypoint.sh
+
+# Ensure the entrypoint is executable
+RUN chmod +x /app/entrypoint.sh
+
+# dstack mounts the socket at /var/run/dstack.sock
+# The validator reads attestation from it automatically
+
+ENTRYPOINT ["/app/entrypoint.sh"]

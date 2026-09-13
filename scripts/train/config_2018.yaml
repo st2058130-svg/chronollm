@@ -1,0 +1,227 @@
+# SN38 cutoff-model pretrain config — 2018 — revision 3
+#
+# Independent design goals:
+#   - cutoff-safe tokenizer AND cutoff-safe model data;
+#   - ~32K vocabulary so Nanochrono spends fewer parameters on repeated vocab embeddings;
+#   - reinvest saved vocab parameters into 28 transformer layers;
+#   - 2 local : 1 global attention pattern, ending with a global layer;
+#   - FP32 master parameters + BF16 autocast compute;
+#   - compact BF16 inference export for the <8 GB upload requirement;
+#   - weighted/interleaved historical stream + held-out validation.
+
+year: 2018
+output_dir: runs/nanochrono-2018
+checkpoint_dir: checkpoints/nanochrono-2018
+max_parameters: 2200000000
+
+dataset: HuggingFaceFW/fineweb-edu
+
+# 51 training crawls. Two configs are held out below for validation.
+dumps:
+  # 2018 (11 train; 2018-05 held out)
+  - CC-MAIN-2018-51
+  - CC-MAIN-2018-47
+  - CC-MAIN-2018-43
+  - CC-MAIN-2018-39
+  - CC-MAIN-2018-34
+  - CC-MAIN-2018-30
+  - CC-MAIN-2018-26
+  - CC-MAIN-2018-22
+  - CC-MAIN-2018-17
+  - CC-MAIN-2018-13
+  - CC-MAIN-2018-09
+
+  # 2017 (12)
+  - CC-MAIN-2017-51
+  - CC-MAIN-2017-47
+  - CC-MAIN-2017-43
+  - CC-MAIN-2017-39
+  - CC-MAIN-2017-34
+  - CC-MAIN-2017-30
+  - CC-MAIN-2017-26
+  - CC-MAIN-2017-22
+  - CC-MAIN-2017-17
+  - CC-MAIN-2017-13
+  - CC-MAIN-2017-09
+  - CC-MAIN-2017-04
+
+  # 2016 (9)
+  - CC-MAIN-2016-50
+  - CC-MAIN-2016-44
+  - CC-MAIN-2016-40
+  - CC-MAIN-2016-36
+  - CC-MAIN-2016-30
+  - CC-MAIN-2016-26
+  - CC-MAIN-2016-22
+  - CC-MAIN-2016-18
+  - CC-MAIN-2016-07
+
+  # 2015 (9 train; 2015-06 held out)
+  - CC-MAIN-2015-48
+  - CC-MAIN-2015-40
+  - CC-MAIN-2015-35
+  - CC-MAIN-2015-32
+  - CC-MAIN-2015-27
+  - CC-MAIN-2015-22
+  - CC-MAIN-2015-18
+  - CC-MAIN-2015-14
+  - CC-MAIN-2015-11
+
+  # 2014 (8)
+  - CC-MAIN-2014-52
+  - CC-MAIN-2014-49
+  - CC-MAIN-2014-42
+  - CC-MAIN-2014-41
+  - CC-MAIN-2014-35
+  - CC-MAIN-2014-23
+  - CC-MAIN-2014-15
+  - CC-MAIN-2014-10
+
+  # 2013 (2)
+  - CC-MAIN-2013-48
+  - CC-MAIN-2013-20
+
+validation_dumps:
+  - CC-MAIN-2018-05
+  - CC-MAIN-2015-06
+
+data:
+  # Boundary-near years receive more probability, but every allowed era is
+  # represented from the beginning. Each year's mass is divided over its crawls.
+  year_weights:
+    2018: 0.30
+    2017: 0.24
+    2016: 0.17
+    2015: 0.13
+    2014: 0.10
+    2013: 0.06
+  docs_per_turn: 32
+  shuffle_buffer_size: 1024
+
+# Our own tokenizer — not the reference model's tokenizer and not GPT-2 BPE.
+# It is trained only from the cutoff-safe training dumps using the same weighted
+# stream. Once created, train_or_load reuses the exact tokenizer on every run.
+tokenizer:
+  mode: train_or_load
+  path: runs/nanochrono-2018/tokenizer-32768
+  vocab_size: 32768
+  train_documents: 50000
+  max_chars_per_document: 16384
+  min_frequency: 2
+  seed: 17042
+  bos_token: "<|bos|>"
+  eos_token: "<|eos|>"
+  unk_token: "<|unk|>"
+
+model:
+  hidden_size: 1792
+  intermediate_size: 7168
+  num_hidden_layers: 28
+  num_attention_heads: 14
+  num_key_value_heads: 14
+  max_position_embeddings: 2048
+  rope_theta: 100000.0
+  sliding_window: 512
+
+  # Independent 2:1 local/global design. Full attention appears regularly and
+  # the final layer is global. This is NOT the 3:1 pattern of the reference model.
+  layer_types:
+    - sliding_attention   # 0
+    - sliding_attention   # 1
+    - full_attention      # 2
+    - sliding_attention   # 3
+    - sliding_attention   # 4
+    - full_attention      # 5
+    - sliding_attention   # 6
+    - sliding_attention   # 7
+    - full_attention      # 8
+    - sliding_attention   # 9
+    - sliding_attention   # 10
+    - full_attention      # 11
+    - sliding_attention   # 12
+    - sliding_attention   # 13
+    - full_attention      # 14
+    - sliding_attention   # 15
+    - sliding_attention   # 16
+    - full_attention      # 17
+    - sliding_attention   # 18
+    - sliding_attention   # 19
+    - full_attention      # 20
+    - sliding_attention   # 21
+    - sliding_attention   # 22
+    - full_attention      # 23
+    - sliding_attention   # 24
+    - sliding_attention   # 25
+    - full_attention      # 26
+    - full_attention      # 27
+
+  attention_multiplier: 1.2
+  final_logit_softcapping: 15.0
+
+  # Keep Nanochrono's distinctive alternate-layer auxiliary pathway for the
+  # first serious run. With 32K vocab this costs much less than with GPT-2 50K.
+  aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
+  aux_gate_dim: 12
+  mix_gate_dim: 24
+  tap_layer: 14
+  use_cache: true
+  tie_word_embeddings: false
+
+# Saved generation defaults are deliberately deterministic for the first model.
+# After training, compare greedy vs controlled sampling on a local Stage-2 set
+# before changing these values for the upload candidate.
+generation:
+  do_sample: false
+  max_new_tokens: 50
+
+train:
+  seq_len: 1024
+  micro_batch_size: 1
+  grad_accum: 64
+
+  # FP32 master parameters are preserved. BF16 is used by torch.autocast only.
+  bf16_autocast: true
+  tf32: true
+
+  learning_rate: 2.0e-4
+  weight_decay: 0.1
+  warmup_steps: 1500
+  init_std: 0.02
+
+  # 75,000 * (1*64*1024) = 4.9152B training tokens.
+  # Still a compute-budget run for ~2.019B params; increase only after measuring
+  # actual Stage-1/Stage-2 gains per additional token.
+  max_steps: 75000
+
+  log_every: 20
+  eval_every: 2500
+  save_every: 2500
+  validation_blocks: 64
+  validation_micro_batch_size: 1
+
+  seed: 42
+  fused_adamw: true
+  grad_clip: 1.0
+  auto_resume: false
+
+# Smoke keeps GPT-2 only to avoid spending time training the 32K tokenizer.
+# This tiny model is a pipeline test and must never be submitted.
+smoke:
+  max_steps: 3
+  micro_batch_size: 1
+  grad_accum: 1
+  seq_len: 128
+  tokenizer_name: gpt2
+  dumps:
+    - CC-MAIN-2018-51
+  model:
+    hidden_size: 256
+    intermediate_size: 512
+    num_hidden_layers: 2
+    num_attention_heads: 4
+    num_key_value_heads: 4
+    max_position_embeddings: 256
+    sliding_window: 128
+    layer_types: [sliding_attention, full_attention]
+    aux_layers: [1]
+    tap_layer: 1

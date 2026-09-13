@@ -1,0 +1,29 @@
+1. Train  →  checkpoints/.../latest/
+2. Upload to HuggingFace
+3. Get commit SHA
+4. Local check:
+     python debug/test_automodel.py checkpoints/.../latest
+5. TEE self-test  ← you are here
+6. If PASS → miner.py on-chain submit
+7. After round → check api.chronollm.com/submissions/{round}/{uid}
+
+Test on colab;
+%cd /content/chronollm
+!pip install -q openai huggingface_hub safetensors transformers
+
+# leak only
+!python scripts/train/compare_models.py user/model-a user/model-b --year 2018
+
+# leak + quality
+!python chronollm/scripts/train/compare_models.py user/model-a user/model-b --year 2018 --quality --no-generation
+
+unzip;
+!unzip -o chronollm.zip -d /content/chronollm
+
+training order;
+without resume: python scripts/train/train.py --config scripts/train/config_2018.yaml
+
+with resume: python scripts/train/train.py --config scripts/train/config_2018.yaml \
+  --resume checkpoints/nanochrono-2018/latest
+
+training hours≈4.92×10**9/(tok/s×3600)

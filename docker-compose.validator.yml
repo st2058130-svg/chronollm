@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  validator:
+    image: chronollm/sn38-validator@sha256:12e9b1637eed49c6758fc780af3fedfbab4781a768f8f78dbc6c913b2ed76737
+
+    restart: "on-failure"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - validator-data:/app/data
+    environment:
+      - NETUID=38
+      - SUBTENSOR_NETWORK=finney
+      - BACKEND_URL=https://api.chronollm.com
+      # This secret is encrypted client-side by Phala CLI before transmission
+      - WALLET_NAME=validator
+      - HOTKEY_FILE_CONTENT=${HOTKEY_FILE_CONTENT}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_DEBUG=${HF_DEBUG:-0}
+    command: ["python", "-m", "sn38.neurons.validator"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  validator-data:

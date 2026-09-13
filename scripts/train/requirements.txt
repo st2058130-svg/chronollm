@@ -1,0 +1,10 @@
+# Train-only deps (no bittensor — that is for submit, not pretrain)
+torch>=2.0
+transformers>=4.48.0
+datasets>=2.19.0
+accelerate>=0.33.0
+safetensors>=0.4.0
+huggingface_hub>=0.24.0
+pyyaml>=6.0
+tqdm>=4.66.0
+numpy>=1.0

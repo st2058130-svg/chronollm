@@ -1,0 +1,21 @@
+__pycache__/
+.idea/
+.venv/
+.venv-train/
+.env
+.local/
+*.pyc
+uv.lock
+validator_cache.db
+models.json
+/phala.toml
+
+# Local mining / training artifacts
+/runs/
+/checkpoints/
+/data/
+/tokenizer/
+*.pt
+*.bin
+*.safetensors
+!sn38/**/*.safetensors
