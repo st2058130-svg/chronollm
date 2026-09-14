@@ -1,8 +1,9 @@
 # SN38 cutoff-model continued pretrain — 2019 from a finished 2018 model
 #
-# Start from 2018 Nanochrono weights (--init-from / init_from below), keep the
-# same tokenizer, then train on FineWeb-Edu crawls through 2019.
-# Do NOT use --resume here unless continuing a previous *2019* run.
+# 2019-heavy: mostly new 2019 FineWeb crawls, plus a small 2017–2018 retention
+# set so continued pretrain does not forget earlier knowledge.
+# Start from 2018 weights (--init-from / init_from). Do NOT use --resume unless
+# continuing a previous *2019* run.
 
 year: 2019
 output_dir: runs/nanochrono-2019
@@ -14,9 +15,9 @@ init_from: checkpoints/nanochrono-2018/latest
 
 dataset: HuggingFaceFW/fineweb-edu
 
-# Training crawls through 2019. Held-out dumps are listed under validation_dumps.
+# ~15 training crawls (was 62). Held-outs under validation_dumps.
 dumps:
-  # 2019 (11 train; 2019-04 held out)
+  # 2019 (11 train; 2019-04 held out) — primary continued-pretrain mass
   - CC-MAIN-2019-51
   - CC-MAIN-2019-47
   - CC-MAIN-2019-43
@@ -29,68 +30,11 @@ dumps:
   - CC-MAIN-2019-13
   - CC-MAIN-2019-09
 
-  # 2018 (11 train; 2018-05 held out)
+  # Retention (keep some pre-2019 signal; 2018 model already saw these eras)
   - CC-MAIN-2018-51
-  - CC-MAIN-2018-47
-  - CC-MAIN-2018-43
-  - CC-MAIN-2018-39
-  - CC-MAIN-2018-34
   - CC-MAIN-2018-30
-  - CC-MAIN-2018-26
-  - CC-MAIN-2018-22
-  - CC-MAIN-2018-17
-  - CC-MAIN-2018-13
   - CC-MAIN-2018-09
-
-  # 2017 (12)
   - CC-MAIN-2017-51
-  - CC-MAIN-2017-47
-  - CC-MAIN-2017-43
-  - CC-MAIN-2017-39
-  - CC-MAIN-2017-34
-  - CC-MAIN-2017-30
-  - CC-MAIN-2017-26
-  - CC-MAIN-2017-22
-  - CC-MAIN-2017-17
-  - CC-MAIN-2017-13
-  - CC-MAIN-2017-09
-  - CC-MAIN-2017-04
-
-  # 2016 (9)
-  - CC-MAIN-2016-50
-  - CC-MAIN-2016-44
-  - CC-MAIN-2016-40
-  - CC-MAIN-2016-36
-  - CC-MAIN-2016-30
-  - CC-MAIN-2016-26
-  - CC-MAIN-2016-22
-  - CC-MAIN-2016-18
-  - CC-MAIN-2016-07
-
-  # 2015 (9 train; 2015-06 held out)
-  - CC-MAIN-2015-48
-  - CC-MAIN-2015-40
-  - CC-MAIN-2015-35
-  - CC-MAIN-2015-32
-  - CC-MAIN-2015-27
-  - CC-MAIN-2015-22
-  - CC-MAIN-2015-18
-  - CC-MAIN-2015-14
-  - CC-MAIN-2015-11
-
-  # 2014 (8)
-  - CC-MAIN-2014-52
-  - CC-MAIN-2014-49
-  - CC-MAIN-2014-42
-  - CC-MAIN-2014-41
-  - CC-MAIN-2014-35
-  - CC-MAIN-2014-23
-  - CC-MAIN-2014-15
-  - CC-MAIN-2014-10
-
-  # 2013 (2)
-  - CC-MAIN-2013-48
-  - CC-MAIN-2013-20
 
 validation_dumps:
   - CC-MAIN-2019-04
@@ -98,17 +42,14 @@ validation_dumps:
 
 data:
   year_weights:
-    2019: 0.28
-    2018: 0.22
-    2017: 0.16
-    2016: 0.12
-    2015: 0.10
-    2014: 0.07
-    2013: 0.05
+    2019: 0.85
+    2018: 0.10
+    2017: 0.05
   docs_per_turn: 4096
   shuffle_buffer_size: 128
-  max_open_sources: 6
-  open_explore_prob: 0.02
+  # Fewer crawls overall → 4 open is enough and safer on ~125GB pods.
+  max_open_sources: 4
+  open_explore_prob: 0.01
 
 # Reuse the 2018 cutoff tokenizer (loaded from init_from). Kept for documentation /
 # fallback if someone trains 2019 without --init-from.
@@ -122,9 +63,6 @@ tokenizer:
     - CC-MAIN-2019-51
     - CC-MAIN-2018-51
     - CC-MAIN-2017-51
-    - CC-MAIN-2016-50
-    - CC-MAIN-2015-48
-    - CC-MAIN-2014-52
   max_chars_per_document: 16384
   min_frequency: 2
   seed: 17043
@@ -202,8 +140,9 @@ train:
   max_steps: 25000
 
   log_every: 20
-  eval_every: 2500
-  save_every: 2500
+  # Save more often so an OOM kill loses less work.
+  eval_every: 500
+  save_every: 500
   validation_blocks: 64
   validation_micro_batch_size: 1
 

@@ -30,3 +30,22 @@ training hours≈4.92×10**9/(tok/s×3600)
 
 cd /workspace/chronollm
 pip install -r scripts/train/requirements.txt
+
+python scripts/train/train.py --config scripts/train/config_2019.yaml \
+  --init-from checkpoints/nanochrono-2018/latest
+
+pip install -U huggingface_hub
+
+huggingface-cli download anacoluthe89/chrono-2018 \
+    --local-dir /workspace/chrono-2018
+
+Upload order;
+hf upload vadimyakob/chrono-2019 /workspace/chronollm/checkpoints/nanochrono-2019/latest --repo-type model
+
+/workspace/chronollm/checkpoints/nanochrono-2019/step-2500/
+/workspace/chronollm/checkpoints/nanochrono-2019/latest/
+/workspace/chronollm/checkpoints/nanochrono-2019/best/
+
+ls -la /workspace/chronollm/checkpoints/nanochrono-2019/
+ls -la /workspace/chronollm/checkpoints/nanochrono-2019/step-2500/
+ls -la /workspace/chronollm/checkpoints/nanochrono-2019/latest/
