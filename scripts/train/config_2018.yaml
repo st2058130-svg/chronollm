@@ -7,7 +7,7 @@
 #   - 2 local : 1 global attention pattern, ending with a global layer;
 #   - FP32 master parameters + BF16 autocast compute;
 #   - compact BF16 inference export for the <8 GB upload requirement;
-#   - weighted/interleaved historical stream + held-out validation.
+#   - cycle FineWeb dumps one-at-a-time (low RAM) + held-out validation.
 
 year: 2018
 output_dir: runs/nanochrono-2018
@@ -86,22 +86,9 @@ validation_dumps:
   - CC-MAIN-2015-06
 
 data:
-  # Boundary-near years receive more probability, but every allowed era is
-  # represented from the beginning. Each year's mass is divided over its crawls.
-  year_weights:
-    2018: 0.30
-    2017: 0.24
-    2016: 0.17
-    2015: 0.13
-    2014: 0.10
-    2013: 0.06
-  docs_per_turn: 4096
-  # Lower buffer = less RAM when FineWeb crawls are open (RunPod OOM risk).
-  shuffle_buffer_size: 128
-  # Cap concurrent crawl iterators to avoid OOM.
-  max_open_sources: 6
-  # While at capacity, usually stay on open crawls (avoids resolve/skip thrash).
-  open_explore_prob: 0.02
+  # sb38-style: cycle dumps one at a time (avoids multi-dump OOM / resolve thrash).
+  # List order = training order; put cutoff-year crawls first if you want them sooner.
+  shuffle_buffer_size: 64
 
 # Our own tokenizer — not the reference model's tokenizer and not GPT-2 BPE.
 # It is trained only from cutoff-safe dumps. Once created, train_or_load reuses it.

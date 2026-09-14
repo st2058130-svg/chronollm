@@ -1,7 +1,7 @@
 """SN38 Nanochrono cutoff pretraining — revision 3.
 
 Main design choices:
-- cutoff-safe weighted/interleaved FineWeb-Edu training stream;
+- cutoff-safe FineWeb-Edu stream that cycles dumps one-at-a-time (sb38-style; low RAM);
 - independently trained ~32K byte-level BPE tokenizer using only cutoff-safe data;
 - 28-layer Nanochrono made possible by the smaller vocabulary;
 - FP32 master parameters with BF16 autocast compute (no destructive whole-model BF16 cast);
@@ -63,11 +63,6 @@ def _id_or_fallback(value, fallback):
     return value if value is not None else fallback
 
 
-def _year_weights(cfg: dict) -> dict[int, float] | None:
-    values = cfg.get("data", {}).get("year_weights", {})
-    return {int(k): float(v) for k, v in values.items()} or None
-
-
 def _finalize_tokenizer(tok, save_dir: Path, model_max_length: int):
     if tok.eos_token_id is None:
         raise SystemExit("[error] tokenizer must define EOS")
@@ -88,7 +83,7 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
     """Train/load our own byte-level BPE using only cutoff-safe training crawls.
 
     The tokenizer is intentionally trained from the *training* dumps, never the
-    held-out validation dumps.  Its source stream uses the same year-mixture
+    held-out validation dumps.  Its source stream uses the same cycling dump
     policy as model pretraining, which keeps tokenizer provenance cutoff-safe.
     """
     tc = dict(cfg.get("tokenizer", {}))
@@ -130,20 +125,13 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
         f"docs={train_documents:,} dumps={len(tok_dumps)} -> {save_dir.resolve()}"
     )
     data_cfg = cfg.get("data", {})
-    shuffle_buf = int(tc.get("shuffle_buffer_size", data_cfg.get("shuffle_buffer_size", 1024)))
-    max_open = tc.get("max_open_sources", data_cfg.get("max_open_sources"))
+    shuffle_buf = int(tc.get("shuffle_buffer_size", data_cfg.get("shuffle_buffer_size", 64)))
     text_stream = build_text_stream(
         tok_dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
         cutoff_year=int(cfg["year"]),
-        year_weights=_year_weights(cfg),
-        docs_per_turn=int(data_cfg.get("docs_per_turn", 32)),
         shuffle_buffer_size=shuffle_buf,
         seed=seed,
-        max_open_sources=int(max_open) if max_open is not None else None,
-        open_explore_prob=float(
-            tc.get("open_explore_prob", data_cfg.get("open_explore_prob", 0.02))
-        ),
     )
 
     def limited_texts():
@@ -435,19 +423,14 @@ def restore_rng_state(state: dict) -> None:
 
 def make_stream(cfg: dict, tokenizer, dumps: list[str], *, seq_len: int, seed: int):
     dc = cfg.get("data", {})
-    max_open = dc.get("max_open_sources")
     return build_packed_stream(
         dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
         tokenizer,
         cutoff_year=int(cfg["year"]),
         seq_len=seq_len,
-        year_weights=_year_weights(cfg),
-        docs_per_turn=int(dc.get("docs_per_turn", 32)),
-        shuffle_buffer_size=int(dc.get("shuffle_buffer_size", 1024)),
+        shuffle_buffer_size=int(dc.get("shuffle_buffer_size", 64)),
         seed=seed,
-        max_open_sources=int(max_open) if max_open is not None else None,
-        open_explore_prob=float(dc.get("open_explore_prob", 0.02)),
     )
 
 
@@ -608,8 +591,12 @@ def main():
     data_iter = iter(packed)
     if state is not None:
         if "data_state" in state:
-            packed.load_state_dict(state["data_state"])
-            print("[resume] restored interleaver + pack buffer")
+            try:
+                packed.load_state_dict(state["data_state"])
+                print("[resume] restored cycle stream + pack buffer")
+            except ValueError as exc:
+                print(f"[resume] data_state incompatible ({exc}); replaying sequences")
+                legacy_skip_sequences(data_iter, sequences_consumed)
         else:
             legacy_skip_sequences(data_iter, sequences_consumed)
 

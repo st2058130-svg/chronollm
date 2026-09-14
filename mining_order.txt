@@ -32,12 +32,12 @@ cd /workspace/chronollm
 pip install -r scripts/train/requirements.txt
 
 python scripts/train/train.py --config scripts/train/config_2019.yaml \
-  --init-from checkpoints/nanochrono-2018/latest
+  --init-from checkpoints/nanochrono-2018
 
 pip install -U huggingface_hub
 
-huggingface-cli download anacoluthe89/chrono-2018 \
-    --local-dir /workspace/chrono-2018
+hf download anacoluthe89/chrono-2018 \
+    --local-dir /workspace/nanochrono-2018
 
 Upload order;
 hf upload vadimyakob/chrono-2019 /workspace/chronollm/checkpoints/nanochrono-2019/latest --repo-type model
@@ -49,3 +49,6 @@ hf upload vadimyakob/chrono-2019 /workspace/chronollm/checkpoints/nanochrono-201
 ls -la /workspace/chronollm/checkpoints/nanochrono-2019/
 ls -la /workspace/chronollm/checkpoints/nanochrono-2019/step-2500/
 ls -la /workspace/chronollm/checkpoints/nanochrono-2019/latest/
+ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
+
+hf repo-files delete vadimyakob/chrono-2018-4 train_meta.txt train_state.pt

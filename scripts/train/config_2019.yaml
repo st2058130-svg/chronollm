@@ -41,15 +41,9 @@ validation_dumps:
   - CC-MAIN-2018-05
 
 data:
-  year_weights:
-    2019: 0.85
-    2018: 0.10
-    2017: 0.05
-  docs_per_turn: 4096
-  shuffle_buffer_size: 128
-  # Fewer crawls overall → 4 open is enough and safer on ~125GB pods.
-  max_open_sources: 4
-  open_explore_prob: 0.01
+  # sb38-style: cycle dumps one at a time (avoids multi-dump OOM / resolve thrash).
+  # dumps list is already 2019-first with light retention at the end.
+  shuffle_buffer_size: 64
 
 # Reuse the 2018 cutoff tokenizer (loaded from init_from). Kept for documentation /
 # fallback if someone trains 2019 without --init-from.
