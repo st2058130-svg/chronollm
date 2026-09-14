@@ -67,9 +67,9 @@ LEAK_ITEMS = [
 GENERATE_PROMPTS = [
     "The first person to set foot on the Moon was",
     "A recipe for pancakes typically starts by mixing flour, eggs, and",
-    "The river that flows through London is called the",
+    "Why do plants at the bottom of a rainforest canopy often have larger leaves than those at the top?",
     "When you mix red and blue paint together, you get",
-    "The inventor of the telephone was",
+    "Is it true that humans only use 10% of their brain? Explain why or why not.",
 ]
 
 
@@ -294,6 +294,8 @@ def print_ranking_table(rankings, config: dict, quality_meta: dict) -> None:
     print("-" * 68)
     winner = rankings[0]
     print(f"quality duel winner: {quality_meta['duel_winner'] or 'tie'}")
+    if quality_meta.get("prompt_wins"):
+        print(f"prompt wins: {quality_meta['prompt_wins']}")
     print(f"rank #1 by final score: {winner.label} ({winner.final_score:.4f})\n")
 
 
@@ -374,7 +376,11 @@ def main():
         "--quality-prompts-per-category",
         type=int,
         default=6,
-        help="OpenAI-generated prompts per category (lower = cheaper/faster)",
+        help=(
+            "OpenAI-generated prompts per category when using --openai-prompts "
+            "(validator default is 50; lower = cheaper local checks). "
+            "Categories now include math/truthfulness/pronoun/paraphrase/word_sense."
+        ),
     )
     parser.add_argument(
         "--openai-prompts",
@@ -468,11 +474,13 @@ def main():
                     "judge_model": quality_result.judge_model,
                     "prompt_source": prompt_source,
                     "duel_winner": quality_result.winner_label,
+                    "prompt_wins": quality_result.prompt_wins_by_label,
                 },
             )
             print(
-                "NOTE: dashboard quality scores come from round-robin vs many miners. "
-                "Here you only duel A vs B, so quality is 1.0/0.0 (or 0/0 on tie).\n"
+                "NOTE: dashboard quality is prompt-level win rate across round-robin duels.\n"
+                "Here you only duel A vs B; quality_score is each model's prompt win fraction "
+                f"({quality_result.prompt_wins_by_label}).\n"
             )
 
         if not args.no_generation:

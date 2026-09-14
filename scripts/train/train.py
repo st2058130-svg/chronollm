@@ -14,6 +14,8 @@ Examples:
   python scripts/train/train.py --config scripts/train/config_2018.yaml
   python scripts/train/train.py --config scripts/train/config_2018.yaml \
       --resume checkpoints/nanochrono-2018/latest
+  python scripts/train/train.py --config scripts/train/config_2019.yaml \
+      --init-from checkpoints/nanochrono-2018/latest
 """
 
 from __future__ import annotations
@@ -328,6 +330,24 @@ def load_resume_checkpoint(resume_path: Path, device: torch.device):
     return model, tokenizer, state, start_step, sequences, tokens_seen
 
 
+def load_init_from(init_path: Path, device: torch.device):
+    """Load model+tokenizer weights for a new continued-pretrain run.
+
+    Unlike --resume, this does *not* restore optimizer, scheduler, step counter,
+    or FineWeb stream state. Use for 2018 -> 2019 (etc.) cutoff continuation.
+    Prefer an FP32 training checkpoint (e.g. .../latest) over final-bf16.
+    """
+    print(f"[init-from] loading weights from {init_path.resolve()}")
+    if not init_path.exists():
+        raise SystemExit(f"[error] init_from path does not exist: {init_path}")
+    tokenizer = AutoTokenizer.from_pretrained(init_path)
+    model = NanochronoForCausalLM.from_pretrained(init_path)
+    model.to(device=device, dtype=torch.float32)
+    model.train()
+    print("[init-from] weights loaded; fresh optimizer/data/step counter")
+    return model, tokenizer
+
+
 def _save_model_files(model, tokenizer, path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(path, safe_serialization=True)
@@ -477,6 +497,11 @@ def main():
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--resume", default=None)
+    parser.add_argument(
+        "--init-from",
+        default=None,
+        help="Load model/tokenizer weights only (new run). Overrides config init_from.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -485,6 +510,9 @@ def main():
     val_dumps = list(cfg.get("validation_dumps", []))
     model_cfg = dict(cfg.get("model", {}))
     max_parameters = int(cfg.get("max_parameters", DEFAULT_MAX_PARAMETERS))
+
+    if args.resume and (args.init_from or cfg.get("init_from")):
+        raise SystemExit("[error] use only one of --resume and --init-from / config init_from")
 
     if set(dumps) & set(val_dumps):
         raise SystemExit(f"[error] train/validation overlap: {sorted(set(dumps)&set(val_dumps))}")
@@ -526,6 +554,7 @@ def main():
     print(f"[env] cutoff={cfg['year']} train_dumps={len(dumps)} val_dumps={len(val_dumps)}")
 
     resume_path = resolve_resume_path(args, cfg, ckpt_dir)
+    init_from = None if args.smoke else (args.init_from or cfg.get("init_from"))
     state = None
     start_step = 1
     sequences_consumed = 0
@@ -533,6 +562,8 @@ def main():
 
     if resume_path is not None:
         model, tokenizer, state, start_step, sequences_consumed, tokens_seen = load_resume_checkpoint(resume_path, device)
+    elif init_from:
+        model, tokenizer = load_init_from(Path(init_from), device)
     else:
         if args.smoke:
             tokenizer = build_pretrained_tokenizer(

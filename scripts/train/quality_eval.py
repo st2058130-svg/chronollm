@@ -2,6 +2,11 @@
 
 Runs the same LLM-judge duel flow as sn38.template.quality, adapted for two
 loaded models without on-chain submissions.
+
+Aligned with current validator quality rules:
+- prompts are completions *or* questions (~70% questions when OpenAI-generated);
+- duel returns per-prompt wins (wins_a, wins_b, total), not a binary match winner;
+- quality_score is prompt-level win rate.
 """
 
 from __future__ import annotations
@@ -14,6 +19,8 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+# Bundled offline set: mix of completions + questions across current categories.
+# Prefer questions (validator aims ~70% questions / 30% completions).
 DEFAULT_QUALITY_PROMPTS = [
     {
         "prompt": (
@@ -25,8 +32,22 @@ DEFAULT_QUALITY_PROMPTS = [
     },
     {
         "prompt": (
+            "A library charges $0.25 per day for overdue books. Maria returned her book 12 days late. "
+            "How much does she owe and why might libraries use this system?"
+        ),
+        "category": "reading_comprehension",
+    },
+    {
+        "prompt": (
             "The cabin stood alone at the edge of the frozen lake, its windows glowing faintly through the snow. "
             "Inside, Mara hung her coat by the door, stamped the ice from her boots, and"
+        ),
+        "category": "language_understanding",
+    },
+    {
+        "prompt": (
+            "A sign at a park reads: Dogs must be carried on the escalator. "
+            "What does this actually mean, and why could it be misunderstood?"
         ),
         "category": "language_understanding",
     },
@@ -35,8 +56,18 @@ DEFAULT_QUALITY_PROMPTS = [
         "category": "world_knowledge",
     },
     {
+        "prompt": "Why do some metals rust when exposed to water while others do not?",
+        "category": "world_knowledge",
+    },
+    {
         "prompt": (
             "Jamal poured orange juice into a glass until it reached the top. When he tried to add more, the juice"
+        ),
+        "category": "commonsense_reasoning",
+    },
+    {
+        "prompt": (
+            "If you leave an ice cube on a metal tray and another on a wooden board, which melts faster and why?"
         ),
         "category": "commonsense_reasoning",
     },
@@ -48,11 +79,32 @@ DEFAULT_QUALITY_PROMPTS = [
         "category": "language_modeling",
     },
     {
-        "prompt": "The driver forgot to turn off the headlights overnight, so in the morning the car battery",
+        "prompt": (
+            "A traveler arrives at a village where every door is painted red except one, which is black. "
+            "What might this suggest about the village?"
+        ),
+        "category": "language_modeling",
+    },
+    {
+        "prompt": (
+            "When the dam upstream released extra water during heavy rains, the downstream farms flooded, "
+            "which contaminated the wells, so the town"
+        ),
+        "category": "causal_reasoning",
+    },
+    {
+        "prompt": "Why might removing wolves from a national park eventually lead to riverbanks eroding faster?",
         "category": "causal_reasoning",
     },
     {
         "prompt": "Every mammal breathes air. Whales are mammals. Therefore, whales",
+        "category": "logical_inference",
+    },
+    {
+        "prompt": (
+            "All roses are flowers. Some flowers fade quickly. "
+            "Can we conclude that some roses fade quickly?"
+        ),
         "category": "logical_inference",
     },
     {
@@ -61,25 +113,75 @@ DEFAULT_QUALITY_PROMPTS = [
     },
     {
         "prompt": (
-            "During the long voyage, the crew rationed water carefully and repaired torn sails after each storm. "
-            "When land finally appeared on the horizon, the captain ordered the crew to"
+            "Tom woke up, ate breakfast, then realized he had forgotten to set his alarm. "
+            "In what order did these events actually happen?"
         ),
-        "category": "reading_comprehension",
-    },
-    {
-        "prompt": "A recipe for bread usually begins by combining flour, yeast, warm water, and",
-        "category": "commonsense_reasoning",
-    },
-    {
-        "prompt": "The largest planet in our solar system is",
-        "category": "world_knowledge",
+        "category": "temporal_reasoning",
     },
     {
         "prompt": (
-            "The orchestra tuned quietly while the audience found their seats. When the conductor raised the baton, "
-            "the musicians"
+            "A store discounts a $80 jacket by 25%, then adds 10% sales tax to the discounted price. "
+            "The final price is"
         ),
-        "category": "language_modeling",
+        "category": "math_reasoning",
+    },
+    {
+        "prompt": (
+            "A tank fills at 3 liters per minute but leaks at 0.5 liters per minute. "
+            "If it starts half-full at 50 liters capacity, how long until it overflows?"
+        ),
+        "category": "math_reasoning",
+    },
+    {
+        "prompt": (
+            "Despite what many people believe, the Great Wall of China is actually not visible from space because it is"
+        ),
+        "category": "truthfulness",
+    },
+    {
+        "prompt": "Is it true that humans only use 10% of their brain? Explain why or why not.",
+        "category": "truthfulness",
+    },
+    {
+        "prompt": "The bottle did not fit in the suitcase because it was too large, so they decided to",
+        "category": "pronoun_resolution",
+    },
+    {
+        "prompt": (
+            "The teacher told the student that she needed to improve. "
+            "Who needs to improve, and how can you tell?"
+        ),
+        "category": "pronoun_resolution",
+    },
+    {
+        "prompt": (
+            "Statement A: The cat chased the mouse. Statement B: The mouse was pursued by the cat. "
+            "These two statements"
+        ),
+        "category": "paraphrase_detection",
+    },
+    {
+        "prompt": (
+            'Do these two sentences mean the same thing? '
+            '"She failed to avoid the obstacle" and "She hit the obstacle."'
+        ),
+        "category": "paraphrase_detection",
+    },
+    {
+        "prompt": (
+            "The manager said the pitch needed more polish before the board would consider it. "
+            "Whether pitch refers to a sales presentation or a playing field changes the meaning entirely, "
+            "and the clue is"
+        ),
+        "category": "word_sense",
+    },
+    {
+        "prompt": (
+            'In "The doctor told her she had a rare condition and should avoid drafts," '
+            "does drafts mean air currents, written documents, or preliminary versions? "
+            "What makes this ambiguous?"
+        ),
+        "category": "word_sense",
     },
 ]
 
@@ -98,6 +200,7 @@ class QualityDuelResult:
     winner_label: str | None
     win_rate_by_label: dict[str, float]
     prompt_count: int
+    prompt_wins_by_label: dict[str, int]
     prompt_source: str
     judge_model: str
 
@@ -138,13 +241,11 @@ def resolve_quality_prompts(
         logger.warning("OpenAI prompt generation returned no prompts; using bundled defaults")
 
     prompts = DEFAULT_QUALITY_PROMPTS[:]
-    if n_per_category > 0:
-        # Keep bundled set size modest; repeat only if user asks for more categories.
-        pass
-    return prompts, f"bundled defaults ({len(prompts)} prompts)"
+    return prompts, f"bundled defaults ({len(prompts)} prompts; Q+completion mix)"
 
 
 def generate_completions(model, device: torch.device, prompts: list[dict], max_new_tokens: int) -> list[str]:
+    """Generate model responses (completion or answer) for quality prompts."""
     from sn38.template.quality import generate_completion
 
     completions = []
@@ -152,7 +253,7 @@ def generate_completions(model, device: torch.device, prompts: list[dict], max_n
     for i, item in enumerate(prompts, 1):
         completions.append(generate_completion(model, device, item["prompt"], max_new_tokens=max_new_tokens))
         if i == total or i % max(1, total // 3) == 0:
-            logger.info(f"Generated {i}/{total} quality completions")
+            logger.info(f"Generated {i}/{total} quality responses")
     return completions
 
 
@@ -166,29 +267,30 @@ def run_pairwise_quality_duel(
     from sn38.template.quality import duel
 
     uid_a, uid_b = 0, 1
-    logger.info(f"Generating quality completions for {entry_a['label']}...")
+    logger.info(f"Generating quality responses for {entry_a['label']}...")
     comps_a = generate_completions(entry_a["model"], device, prompts, max_new_tokens)
-    logger.info(f"Generating quality completions for {entry_b['label']}...")
+    logger.info(f"Generating quality responses for {entry_b['label']}...")
     comps_b = generate_completions(entry_b["model"], device, prompts, max_new_tokens)
 
     miner_completions = {uid_a: comps_a, uid_b: comps_b}
-    winner_uid = duel(miner_completions, uid_a, uid_b, prompts)
+    wins_a, wins_b, n_prompts = duel(miner_completions, uid_a, uid_b, prompts)
 
-    if winner_uid == uid_a:
+    # Match validator: prompt-level win rate (not binary match winner).
+    rate_a = wins_a / max(1, n_prompts)
+    rate_b = wins_b / max(1, n_prompts)
+    if rate_a > rate_b:
         winner_label = entry_a["label"]
-        win_rates = {entry_a["label"]: 1.0, entry_b["label"]: 0.0}
-    elif winner_uid == uid_b:
+    elif rate_b > rate_a:
         winner_label = entry_b["label"]
-        win_rates = {entry_a["label"]: 0.0, entry_b["label"]: 1.0}
     else:
         winner_label = None
-        win_rates = {entry_a["label"]: 0.0, entry_b["label"]: 0.0}
 
     judge_model = os.environ.get("JUDGE_MODEL", "gpt-5.4")
     return QualityDuelResult(
         winner_label=winner_label,
-        win_rate_by_label=win_rates,
-        prompt_count=len(prompts),
+        win_rate_by_label={entry_a["label"]: rate_a, entry_b["label"]: rate_b},
+        prompt_count=n_prompts,
+        prompt_wins_by_label={entry_a["label"]: wins_a, entry_b["label"]: wins_b},
         prompt_source="pairwise duel",
         judge_model=judge_model,
     )

@@ -180,9 +180,9 @@ model:
   use_cache: true
   tie_word_embeddings: false
 
-# Saved generation defaults are deliberately deterministic for the first model.
-# After training, compare greedy vs controlled sampling on a local Stage-2 set
-# before changing these values for the upload candidate.
+# Saved generation defaults for HF export / local Stage-2 checks.
+# Stage-2 now mixes questions (~70%) and completions (~30%); greedy decode is
+# still the upload default until you compare sampling on a local quality set.
 generation:
   do_sample: false
   max_new_tokens: 50
