@@ -95,17 +95,30 @@ data:
     2015: 0.13
     2014: 0.10
     2013: 0.06
-  docs_per_turn: 32
-  shuffle_buffer_size: 1024
+  docs_per_turn: 4096
+  # Lower buffer = less RAM when FineWeb crawls are open (RunPod OOM risk).
+  shuffle_buffer_size: 128
+  # Cap concurrent crawl iterators to avoid OOM.
+  max_open_sources: 6
+  # While at capacity, usually stay on open crawls (avoids resolve/skip thrash).
+  open_explore_prob: 0.02
 
 # Our own tokenizer — not the reference model's tokenizer and not GPT-2 BPE.
-# It is trained only from the cutoff-safe training dumps using the same weighted
-# stream. Once created, train_or_load reuses the exact tokenizer on every run.
+# It is trained only from cutoff-safe dumps. Once created, train_or_load reuses it.
+# Use a small dumps subset here so tokenizer build does not open all 51 crawls.
 tokenizer:
   mode: train_or_load
   path: runs/nanochrono-2018/tokenizer-32768
   vocab_size: 32768
-  train_documents: 50000
+  train_documents: 15000
+  shuffle_buffer_size: 128
+  dumps:
+    - CC-MAIN-2018-51
+    - CC-MAIN-2017-51
+    - CC-MAIN-2016-50
+    - CC-MAIN-2015-48
+    - CC-MAIN-2014-52
+    - CC-MAIN-2013-48
   max_chars_per_document: 16384
   min_frequency: 2
   seed: 17042

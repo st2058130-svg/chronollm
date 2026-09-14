@@ -18,14 +18,14 @@ import hashlib
 import itertools
 import random
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from typing import Iterator
 
 import torch
 from datasets import load_dataset
 
 
-_DUMP_YEAR_RE = re.compile(r"CC-MAIN-(\d{4})-")
+_DUMP_YEAR_RE = re.compile(r"CC-MAIN-(\d{4})-\d+")
 
 
 def dump_year(dump: str) -> int:
@@ -92,6 +92,11 @@ class InterleavedFineWebStream:
     buffer.  The state stores source offsets plus scheduler RNG state, so resume
     reconstructs the current location instead of replaying the entire mixed
     training stream.
+
+    `max_open_sources` caps how many crawl iterators stay resident. When the cap
+    is reached, source picks stay inside the open set most of the time so we do
+    not thrash Hub "Resolving data files" + expensive ds.skip(offset) rebuilds.
+    Occasional explores (`open_explore_prob`) rotate in a new crawl.
     """
 
     def __init__(
@@ -104,12 +109,18 @@ class InterleavedFineWebStream:
         docs_per_turn: int = 32,
         shuffle_buffer_size: int = 1024,
         seed: int = 42,
+        max_open_sources: int | None = None,
+        open_explore_prob: float = 0.02,
     ):
         validate_cutoff_dumps(dumps, cutoff_year)
         if docs_per_turn <= 0:
             raise ValueError("docs_per_turn must be > 0")
         if shuffle_buffer_size < 0:
             raise ValueError("shuffle_buffer_size must be >= 0")
+        if max_open_sources is not None and max_open_sources < 1:
+            raise ValueError("max_open_sources must be >= 1 when set")
+        if not 0.0 <= open_explore_prob <= 1.0:
+            raise ValueError("open_explore_prob must be in [0, 1]")
 
         self.dumps = list(dumps)
         self.dataset = dataset
@@ -117,12 +128,17 @@ class InterleavedFineWebStream:
         self.docs_per_turn = int(docs_per_turn)
         self.shuffle_buffer_size = int(shuffle_buffer_size)
         self.seed = int(seed)
+        self.max_open_sources = (
+            None if max_open_sources is None else int(max_open_sources)
+        )
+        self.open_explore_prob = float(open_explore_prob)
         self.source_weights = _normalized_source_weights(self.dumps, year_weights)
+        self._weight_by_dump = dict(zip(self.dumps, self.source_weights))
 
         self._rng = random.Random(self.seed)
         self._offsets = {d: 0 for d in self.dumps}  # shuffled rows consumed per source
         self._cycles = {d: 0 for d in self.dumps}
-        self._iters: dict[str, Iterator] = {}
+        self._iters: OrderedDict[str, Iterator] = OrderedDict()
         self._active_dump: str | None = None
         self._remaining_in_turn = 0
 
@@ -142,8 +158,39 @@ class InterleavedFineWebStream:
             ds = ds.skip(offset)
         return iter(ds)
 
+    def _evict_one(self) -> None:
+        """Drop the cheapest-to-rebuild open source (smallest skip offset)."""
+        if not self._iters:
+            return
+        victim = min(self._iters.keys(), key=lambda d: self._offsets[d])
+        del self._iters[victim]
+
+    def _get_source_iter(self, dump: str) -> Iterator:
+        if dump in self._iters:
+            self._iters.move_to_end(dump)
+            return self._iters[dump]
+
+        if self.max_open_sources is not None:
+            while len(self._iters) >= self.max_open_sources:
+                self._evict_one()
+
+        source_iter = self._make_source_iter(dump)
+        self._iters[dump] = source_iter
+        return source_iter
+
+    def _pick_from(self, candidates: list[str]) -> str:
+        weights = [self._weight_by_dump[d] for d in candidates]
+        return self._rng.choices(candidates, weights=weights, k=1)[0]
+
     def _pick_source(self) -> str:
-        return self._rng.choices(self.dumps, weights=self.source_weights, k=1)[0]
+        # Fill the open set first, then stay sticky to avoid resolve/skip thrash.
+        if self.max_open_sources is None or len(self._iters) < self.max_open_sources:
+            return self._pick_from(self.dumps)
+
+        open_dumps = list(self._iters.keys())
+        if open_dumps and self._rng.random() >= self.open_explore_prob:
+            return self._pick_from(open_dumps)
+        return self._pick_from(self.dumps)
 
     def __next__(self) -> str:
         while True:
@@ -152,10 +199,7 @@ class InterleavedFineWebStream:
                 self._remaining_in_turn = self.docs_per_turn
 
             dump = self._active_dump
-            source_iter = self._iters.get(dump)
-            if source_iter is None:
-                source_iter = self._make_source_iter(dump)
-                self._iters[dump] = source_iter
+            source_iter = self._get_source_iter(dump)
 
             try:
                 row = next(source_iter)
@@ -167,6 +211,7 @@ class InterleavedFineWebStream:
                 # deterministically re-shuffled cycle of that source.
                 self._cycles[dump] += 1
                 self._offsets[dump] = 0
+                self._iters.pop(dump, None)
                 self._iters[dump] = self._make_source_iter(dump)
                 continue
 
@@ -254,6 +299,8 @@ def build_packed_stream(
     docs_per_turn: int,
     shuffle_buffer_size: int,
     seed: int,
+    max_open_sources: int | None = None,
+    open_explore_prob: float = 0.02,
 ) -> PackedCausalStream:
     text_stream = InterleavedFineWebStream(
         dumps,
@@ -263,6 +310,8 @@ def build_packed_stream(
         docs_per_turn=docs_per_turn,
         shuffle_buffer_size=shuffle_buffer_size,
         seed=seed,
+        max_open_sources=max_open_sources,
+        open_explore_prob=open_explore_prob,
     )
     return PackedCausalStream(text_stream, tokenizer, seq_len)
 
@@ -293,6 +342,8 @@ def build_text_stream(
     docs_per_turn: int,
     shuffle_buffer_size: int,
     seed: int,
+    max_open_sources: int | None = None,
+    open_explore_prob: float = 0.02,
 ) -> InterleavedFineWebStream:
     """Build the same cutoff-safe weighted text stream used for pretraining.
 
@@ -307,4 +358,6 @@ def build_text_stream(
         docs_per_turn=docs_per_turn,
         shuffle_buffer_size=shuffle_buffer_size,
         seed=seed,
+        max_open_sources=max_open_sources,
+        open_explore_prob=open_explore_prob,
     )

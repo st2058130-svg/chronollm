@@ -114,19 +114,34 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
     eos = str(tc.get("eos_token", "<|eos|>"))
     unk = str(tc.get("unk_token", "<|unk|>"))
 
+    # Optional smaller crawl set for tokenizer only (avoids opening all train dumps in RAM).
+    tok_dumps = list(tc.get("dumps") or dumps)
+    validate_cutoff_dumps(tok_dumps, int(cfg["year"]))
+    if set(tok_dumps) - set(dumps):
+        raise SystemExit(
+            f"[error] tokenizer.dumps must be a subset of training dumps: "
+            f"{sorted(set(tok_dumps) - set(dumps))}"
+        )
+
     print(
         f"[tok] training cutoff-safe byte-level BPE vocab={vocab_size:,} "
-        f"docs={train_documents:,} -> {save_dir.resolve()}"
+        f"docs={train_documents:,} dumps={len(tok_dumps)} -> {save_dir.resolve()}"
     )
     data_cfg = cfg.get("data", {})
+    shuffle_buf = int(tc.get("shuffle_buffer_size", data_cfg.get("shuffle_buffer_size", 1024)))
+    max_open = tc.get("max_open_sources", data_cfg.get("max_open_sources"))
     text_stream = build_text_stream(
-        dumps,
+        tok_dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
         cutoff_year=int(cfg["year"]),
         year_weights=_year_weights(cfg),
         docs_per_turn=int(data_cfg.get("docs_per_turn", 32)),
-        shuffle_buffer_size=int(data_cfg.get("shuffle_buffer_size", 1024)),
+        shuffle_buffer_size=shuffle_buf,
         seed=seed,
+        max_open_sources=int(max_open) if max_open is not None else None,
+        open_explore_prob=float(
+            tc.get("open_explore_prob", data_cfg.get("open_explore_prob", 0.02))
+        ),
     )
 
     def limited_texts():
@@ -400,6 +415,7 @@ def restore_rng_state(state: dict) -> None:
 
 def make_stream(cfg: dict, tokenizer, dumps: list[str], *, seq_len: int, seed: int):
     dc = cfg.get("data", {})
+    max_open = dc.get("max_open_sources")
     return build_packed_stream(
         dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
@@ -410,6 +426,8 @@ def make_stream(cfg: dict, tokenizer, dumps: list[str], *, seq_len: int, seed: i
         docs_per_turn=int(dc.get("docs_per_turn", 32)),
         shuffle_buffer_size=int(dc.get("shuffle_buffer_size", 1024)),
         seed=seed,
+        max_open_sources=int(max_open) if max_open is not None else None,
+        open_explore_prob=float(dc.get("open_explore_prob", 0.02)),
     )
 
 

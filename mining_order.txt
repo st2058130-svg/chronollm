@@ -27,3 +27,6 @@ with resume: python scripts/train/train.py --config scripts/train/config_2018.ya
   --resume checkpoints/nanochrono-2018/latest
 
 training hours≈4.92×10**9/(tok/s×3600)
+
+cd /workspace/chronollm
+pip install -r scripts/train/requirements.txt
