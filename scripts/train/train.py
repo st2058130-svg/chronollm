@@ -3,6 +3,7 @@
 Main design choices:
 - cutoff-safe FineWeb-Edu mix with year weights but only one crawl open (OOM-safe);
 - optional int_score floor to upsample stronger educational pages;
+- optional SkillMixStream: upsample Stage-2 skill families via heuristic tags;
 - independently trained ~32K byte-level BPE tokenizer using only cutoff-safe data;
 - 28-layer Nanochrono made possible by the smaller vocabulary;
 - FP32 master parameters with BF16 autocast compute (no destructive whole-model BF16 cast);
@@ -70,7 +71,14 @@ def _year_weights(cfg: dict) -> dict[int, float] | None:
     return {int(k): float(v) for k, v in values.items()} or None
 
 
-def _data_stream_options(cfg: dict) -> dict:
+def _skill_mix_options(cfg: dict) -> dict | None:
+    sm = cfg.get("skill_mix") or cfg.get("data", {}).get("skill_mix")
+    if not sm or not sm.get("enabled"):
+        return None
+    return dict(sm)
+
+
+def _data_stream_options(cfg: dict, *, enable_skill_mix: bool = True) -> dict:
     dc = cfg.get("data", {})
     min_int = dc.get("min_int_score", None)
     min_score = dc.get("min_score", None)
@@ -81,6 +89,7 @@ def _data_stream_options(cfg: dict) -> dict:
         min_int_score=int(min_int) if min_int is not None else None,
         min_score=float(min_score) if min_score is not None else None,
         sequential=bool(dc.get("sequential", False)),
+        skill_mix=_skill_mix_options(cfg) if enable_skill_mix else None,
     )
 
 
@@ -145,7 +154,7 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
         f"[tok] training cutoff-safe byte-level BPE vocab={vocab_size:,} "
         f"docs={train_documents:,} dumps={len(tok_dumps)} -> {save_dir.resolve()}"
     )
-    opts = _data_stream_options(cfg)
+    opts = _data_stream_options(cfg, enable_skill_mix=False)
     # Tokenizer build can use a smaller stickiness / ignore score floor for speed.
     if "shuffle_buffer_size" in tc:
         opts["shuffle_buffer_size"] = int(tc["shuffle_buffer_size"])
@@ -449,8 +458,16 @@ def restore_rng_state(state: dict) -> None:
         torch.cuda.set_rng_state_all(state["cuda_rng_state_all"])
 
 
-def make_stream(cfg: dict, tokenizer, dumps: list[str], *, seq_len: int, seed: int):
-    opts = _data_stream_options(cfg)
+def make_stream(
+    cfg: dict,
+    tokenizer,
+    dumps: list[str],
+    *,
+    seq_len: int,
+    seed: int,
+    enable_skill_mix: bool = True,
+):
+    opts = _data_stream_options(cfg, enable_skill_mix=enable_skill_mix)
     return build_packed_stream(
         dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
@@ -486,7 +503,9 @@ def evaluate_validation(
     val_dumps = list(cfg.get("validation_dumps", []))
     if not val_dumps or blocks <= 0:
         return None
-    stream = make_stream(cfg, tokenizer, val_dumps, seq_len=seq_len, seed=seed)
+    stream = make_stream(
+        cfg, tokenizer, val_dumps, seq_len=seq_len, seed=seed, enable_skill_mix=False
+    )
     model.eval()
     losses = []
     remaining = blocks

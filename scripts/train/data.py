@@ -6,6 +6,7 @@ Design goals:
   the multi-dump OOM / resolve thrash of the old interleaver);
 - stay on a dump for `docs_per_turn` docs before switching;
 - optional FineWeb-Edu `int_score` / `score` quality floor;
+- optional SkillMixStream upsampling of Stage-2 skill families (heuristic tags);
 - pack documents with EOS separators;
 - save/restore stream + packing state for cheap resume.
 
@@ -97,6 +98,210 @@ def _row_passes_quality(row: dict, min_int_score: int | None, min_score: float |
         if float(value) < float(min_score):
             return False
     return True
+
+
+# Aligned with sn38.template.quality_prompts.CATEGORIES (skills, not fixed prompts).
+SKILL_CATEGORIES = [
+    "reading_comprehension",
+    "language_understanding",
+    "world_knowledge",
+    "commonsense_reasoning",
+    "language_modeling",
+    "causal_reasoning",
+    "logical_inference",
+    "temporal_reasoning",
+    "math_reasoning",
+    "truthfulness",
+    "pronoun_resolution",
+    "paraphrase_detection",
+    "word_sense",
+]
+
+# Lightweight keyword / phrase heuristics over FineWeb text (+ optional URL).
+_CATEGORY_PATTERNS: dict[str, list[re.Pattern[str]]] = {
+    "reading_comprehension": [
+        re.compile(r"\b(according to the|in the passage|the author|paragraph|comprehension)\b", re.I),
+        re.compile(r"\b(read the|based on the text|main idea|summar)\b", re.I),
+    ],
+    "language_understanding": [
+        re.compile(r"\b(tone|intent|implied|figurative|metaphor|nuance|means that)\b", re.I),
+        re.compile(r"\b(interpretation|suggests that|in other words)\b", re.I),
+    ],
+    "world_knowledge": [
+        re.compile(r"\b(geography|history|biology|chemistry|physics|capital of|photosynthesis)\b", re.I),
+        re.compile(r"\b(planet|continent|century|scientist|discovered|encyclopedia)\b", re.I),
+        re.compile(r"wikipedia|britannica|edu/", re.I),
+    ],
+    "commonsense_reasoning": [
+        re.compile(r"\b(everyday|common sense|makes sense|you would|in real life)\b", re.I),
+        re.compile(r"\b(if you leave|what happens if|because it was too)\b", re.I),
+    ],
+    "language_modeling": [
+        re.compile(r"\b(once upon|the story|chapter|narrator|she walked|he said)\b", re.I),
+        re.compile(r"\b(novel|fiction|short story|scene)\b", re.I),
+    ],
+    "causal_reasoning": [
+        re.compile(r"\b(because|therefore|as a result|leads to|caused by|consequently)\b", re.I),
+        re.compile(r"\b(feedback|chain of|downstream|upstream|which in turn)\b", re.I),
+    ],
+    "logical_inference": [
+        re.compile(r"\b(therefore|premise|conclusion|if and only if|all .* are|syllogism)\b", re.I),
+        re.compile(r"\b(implies|deduce|logically|cannot conclude)\b", re.I),
+    ],
+    "temporal_reasoning": [
+        re.compile(r"\b(first|then|after that|before|finally|sequence|timeline|next step)\b", re.I),
+        re.compile(r"\b(previously|afterwards|in order|step \d)\b", re.I),
+    ],
+    "math_reasoning": [
+        re.compile(r"\b(equation|fraction|percent|algebra|geometry|calculate|solve for)\b", re.I),
+        re.compile(r"\b(\d+\s*[+\-*/×÷=]\s*\d+|square root|proportion|ratio)\b", re.I),
+        re.compile(r"\b(math|mathematics|word problem)\b", re.I),
+    ],
+    "truthfulness": [
+        re.compile(r"\b(myth|misconception|false claim|is it true|debunk|actually not)\b", re.I),
+        re.compile(r"\b(contrary to popular|fact check|urban legend)\b", re.I),
+    ],
+    "pronoun_resolution": [
+        re.compile(r"\b(he|she|they|it|them|his|her|their)\b.*\b(he|she|they|it|them)\b", re.I),
+        re.compile(r"\b(who does|refers to|the pronoun|ambiguous)\b", re.I),
+    ],
+    "paraphrase_detection": [
+        re.compile(r"\b(in other words|that is to say|equivalently|same meaning|paraphrase)\b", re.I),
+        re.compile(r"\b(restated|rewritten|means the same)\b", re.I),
+    ],
+    "word_sense": [
+        re.compile(r"\b(means|sense of|ambiguous|homonym|definition|polysem)\b", re.I),
+        re.compile(r"\b(depending on context|could mean|word sense)\b", re.I),
+    ],
+}
+
+
+def classify_skill(text: str, url: str = "") -> str | None:
+    """Heuristic skill label for a FineWeb doc, or None if no category matches."""
+    if not text:
+        return None
+    blob = f"{text[:5000]}\n{url or ''}"
+    scores = {
+        cat: sum(1 for pat in patterns if pat.search(blob))
+        for cat, patterns in _CATEGORY_PATTERNS.items()
+    }
+    best_cat, best_score = max(scores.items(), key=lambda kv: kv[1])
+    if best_score <= 0:
+        return None
+    return best_cat
+
+
+def _normalize_category_weights(
+    category_weights: dict[str, float] | None,
+) -> tuple[list[str], list[float]]:
+    cats = list(SKILL_CATEGORIES)
+    if not category_weights:
+        return cats, [1.0] * len(cats)
+    weights = []
+    for c in cats:
+        weights.append(float(category_weights.get(c, 0.0)))
+    if sum(weights) <= 0:
+        return cats, [1.0] * len(cats)
+    return cats, weights
+
+
+class SkillMixStream:
+    """Mix general FineWeb docs with skill-upsampled docs (rejection sampling).
+
+    Still uses a single underlying crawl stream (OOM-safe). With probability
+    `skill_fraction`, hunt for a document matching a sampled quality category
+    (aligned with validator Stage-2 skill families). Otherwise emit the next
+    general document unchanged.
+    """
+
+    def __init__(
+        self,
+        base: CycleFineWebStream,
+        *,
+        skill_fraction: float = 0.2,
+        category_weights: dict[str, float] | None = None,
+        max_skips: int = 64,
+        accept_any_skill_fallback: bool = True,
+        min_chars: int = 200,
+        seed: int = 42,
+    ):
+        if not 0.0 <= skill_fraction <= 1.0:
+            raise ValueError("skill_fraction must be in [0, 1]")
+        if max_skips < 1:
+            raise ValueError("max_skips must be >= 1")
+
+        self.base = base
+        self.skill_fraction = float(skill_fraction)
+        self.max_skips = int(max_skips)
+        self.accept_any_skill_fallback = bool(accept_any_skill_fallback)
+        self.min_chars = int(min_chars)
+        self._rng = random.Random(int(seed) + 90_017)
+        self._categories, self._cat_weights = _normalize_category_weights(category_weights)
+        self._skill_hits = 0
+        self._skill_attempts = 0
+        self._general_hits = 0
+
+        print(
+            f"[data] skill_mix enabled fraction={self.skill_fraction:.2f} "
+            f"max_skips={self.max_skips} categories={len(self._categories)}"
+        )
+
+    def __iter__(self):
+        return self
+
+    def _pick_category(self) -> str:
+        return self._rng.choices(self._categories, weights=self._cat_weights, k=1)[0]
+
+    def __next__(self) -> str:
+        if self._rng.random() >= self.skill_fraction:
+            self._general_hits += 1
+            return next(self.base)
+
+        self._skill_attempts += 1
+        target = self._pick_category()
+        fallback_any: str | None = None
+        last = ""
+        for _ in range(self.max_skips):
+            text = next(self.base)
+            last = text
+            if len(text) < self.min_chars:
+                continue
+            cat = classify_skill(text)
+            if cat == target:
+                self._skill_hits += 1
+                return text
+            if (
+                self.accept_any_skill_fallback
+                and fallback_any is None
+                and cat is not None
+            ):
+                fallback_any = text
+
+        self._skill_hits += 1
+        return fallback_any if fallback_any is not None else last
+
+    def state_dict(self) -> dict:
+        return {
+            "version": "skill_mix_v1",
+            "rng_state": self._rng.getstate(),
+            "base": self.base.state_dict(),
+            "skill_hits": self._skill_hits,
+            "skill_attempts": self._skill_attempts,
+            "general_hits": self._general_hits,
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        if state.get("version") not in {None, "skill_mix_v1"} and "base" not in state:
+            # Plain cycle checkpoint under a skill wrapper: restore base only.
+            self.base.load_state_dict(state)
+            return
+        if "rng_state" in state:
+            self._rng.setstate(state["rng_state"])
+        base_state = state.get("base", state)
+        self.base.load_state_dict(base_state)
+        self._skill_hits = int(state.get("skill_hits", 0))
+        self._skill_attempts = int(state.get("skill_attempts", 0))
+        self._general_hits = int(state.get("general_hits", 0))
 
 
 class CycleFineWebStream:
@@ -356,6 +561,28 @@ def _stream_kwargs(
     )
 
 
+def _maybe_wrap_skill_mix(
+    base: CycleFineWebStream,
+    *,
+    seed: int,
+    skill_mix: dict | None,
+) -> CycleFineWebStream | SkillMixStream:
+    if not skill_mix or not skill_mix.get("enabled"):
+        return base
+    cat_w = skill_mix.get("category_weights") or None
+    if cat_w is not None:
+        cat_w = {str(k): float(v) for k, v in cat_w.items()}
+    return SkillMixStream(
+        base,
+        skill_fraction=float(skill_mix.get("skill_fraction", 0.2)),
+        category_weights=cat_w,
+        max_skips=int(skill_mix.get("max_skips", 64)),
+        accept_any_skill_fallback=bool(skill_mix.get("accept_any_skill_fallback", True)),
+        min_chars=int(skill_mix.get("min_chars", 200)),
+        seed=seed,
+    )
+
+
 def build_packed_stream(
     dumps: list[str],
     dataset: str,
@@ -370,9 +597,10 @@ def build_packed_stream(
     min_int_score: int | None = None,
     min_score: float | None = None,
     sequential: bool = False,
+    skill_mix: dict | None = None,
     **_ignored,
 ) -> PackedCausalStream:
-    text_stream = CycleFineWebStream(
+    text_stream: CycleFineWebStream | SkillMixStream = CycleFineWebStream(
         dumps,
         dataset,
         **_stream_kwargs(
@@ -386,6 +614,7 @@ def build_packed_stream(
             sequential=sequential,
         ),
     )
+    text_stream = _maybe_wrap_skill_mix(text_stream, seed=seed, skill_mix=skill_mix)
     return PackedCausalStream(text_stream, tokenizer, seq_len)
 
 
@@ -418,10 +647,11 @@ def build_text_stream(
     min_int_score: int | None = None,
     min_score: float | None = None,
     sequential: bool = False,
+    skill_mix: dict | None = None,
     **_ignored,
-) -> CycleFineWebStream:
+) -> CycleFineWebStream | SkillMixStream:
     """Same mix policy as pretraining (also used for cutoff tokenizer training)."""
-    return CycleFineWebStream(
+    text_stream: CycleFineWebStream | SkillMixStream = CycleFineWebStream(
         dumps,
         dataset,
         **_stream_kwargs(
@@ -435,3 +665,4 @@ def build_text_stream(
             sequential=sequential,
         ),
     )
+    return _maybe_wrap_skill_mix(text_stream, seed=seed, skill_mix=skill_mix)

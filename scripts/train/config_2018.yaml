@@ -103,6 +103,32 @@ data:
   min_int_score: 4
   sequential: false
 
+# Stage-2 skill upsampling (aligned with sn38.template.quality_prompts categories).
+# Keeps FineWeb as backbone; with skill_fraction of docs, rejection-sample for a
+# matching skill category. Still one crawl open (OOM-safe). Heuristic tags only —
+# does NOT memorize validator prompts.
+skill_mix:
+  enabled: true
+  skill_fraction: 0.20
+  max_skips: 64
+  accept_any_skill_fallback: true
+  min_chars: 200
+  # Optional per-category weights (default = uniform over 13 skills).
+  # category_weights:
+  #   math_reasoning: 1.5
+  #   causal_reasoning: 1.3
+  #   truthfulness: 1.2
+  #   world_knowledge: 1.2
+  #   reading_comprehension: 1.0
+  #   language_understanding: 1.0
+  #   commonsense_reasoning: 1.0
+  #   language_modeling: 1.0
+  #   logical_inference: 1.0
+  #   temporal_reasoning: 1.0
+  #   pronoun_resolution: 1.0
+  #   paraphrase_detection: 1.0
+  #   word_sense: 1.0
+
 # Our own tokenizer — not the reference model's tokenizer and not GPT-2 BPE.
 # It is trained only from cutoff-safe dumps. Once created, train_or_load reuses it.
 # Use a small dumps subset here so tokenizer build does not open all 51 crawls.

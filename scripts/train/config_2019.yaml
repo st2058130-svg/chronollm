@@ -52,6 +52,14 @@ data:
   min_int_score: 4
   sequential: false
 
+# Same Stage-2 skill mix as 2018 (skills, not fixed prompts).
+skill_mix:
+  enabled: true
+  skill_fraction: 0.25
+  max_skips: 64
+  accept_any_skill_fallback: true
+  min_chars: 200
+
 # Reuse the 2018 cutoff tokenizer via init_from. Fallback train_or_load path below
 # is only if someone trains 2019 without init_from (not recommended).
 tokenizer:
