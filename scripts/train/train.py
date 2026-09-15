@@ -1,13 +1,15 @@
 """SN38 Nanochrono cutoff pretraining — revision 3.
 
 Main design choices:
-- cutoff-safe FineWeb-Edu stream that cycles dumps one-at-a-time (sb38-style; low RAM);
+- cutoff-safe FineWeb-Edu mix with year weights but only one crawl open (OOM-safe);
+- optional int_score floor to upsample stronger educational pages;
 - independently trained ~32K byte-level BPE tokenizer using only cutoff-safe data;
 - 28-layer Nanochrono made possible by the smaller vocabulary;
 - FP32 master parameters with BF16 autocast compute (no destructive whole-model BF16 cast);
 - explicit stable initialization because Nanochrono's `_init_weights()` is intentionally empty;
 - exact stream/buffer resume, held-out validation, and best-checkpoint selection;
-- compact BF16 inference export for the final Hugging Face model (<8 GB target).
+- compact BF16 inference export for the final Hugging Face model (<8 GB target);
+- continued pretrain via --init-from / config init_from (fresh opt/data/steps).
 
 Examples:
   python scripts/train/train.py --config scripts/train/config_2018.yaml --smoke
@@ -63,6 +65,25 @@ def _id_or_fallback(value, fallback):
     return value if value is not None else fallback
 
 
+def _year_weights(cfg: dict) -> dict[int, float] | None:
+    values = cfg.get("data", {}).get("year_weights") or {}
+    return {int(k): float(v) for k, v in values.items()} or None
+
+
+def _data_stream_options(cfg: dict) -> dict:
+    dc = cfg.get("data", {})
+    min_int = dc.get("min_int_score", None)
+    min_score = dc.get("min_score", None)
+    return dict(
+        year_weights=_year_weights(cfg),
+        docs_per_turn=int(dc.get("docs_per_turn", 4096)),
+        shuffle_buffer_size=int(dc.get("shuffle_buffer_size", 64)),
+        min_int_score=int(min_int) if min_int is not None else None,
+        min_score=float(min_score) if min_score is not None else None,
+        sequential=bool(dc.get("sequential", False)),
+    )
+
+
 def _finalize_tokenizer(tok, save_dir: Path, model_max_length: int):
     if tok.eos_token_id is None:
         raise SystemExit("[error] tokenizer must define EOS")
@@ -83,8 +104,8 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
     """Train/load our own byte-level BPE using only cutoff-safe training crawls.
 
     The tokenizer is intentionally trained from the *training* dumps, never the
-    held-out validation dumps.  Its source stream uses the same cycling dump
-    policy as model pretraining, which keeps tokenizer provenance cutoff-safe.
+    held-out validation dumps.  Its source stream uses the same weighted
+    single-open mix policy as model pretraining (cutoff-safe).
     """
     tc = dict(cfg.get("tokenizer", {}))
     mode = str(tc.get("mode", "train_or_load"))
@@ -124,14 +145,21 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
         f"[tok] training cutoff-safe byte-level BPE vocab={vocab_size:,} "
         f"docs={train_documents:,} dumps={len(tok_dumps)} -> {save_dir.resolve()}"
     )
-    data_cfg = cfg.get("data", {})
-    shuffle_buf = int(tc.get("shuffle_buffer_size", data_cfg.get("shuffle_buffer_size", 64)))
+    opts = _data_stream_options(cfg)
+    # Tokenizer build can use a smaller stickiness / ignore score floor for speed.
+    if "shuffle_buffer_size" in tc:
+        opts["shuffle_buffer_size"] = int(tc["shuffle_buffer_size"])
+    if "docs_per_turn" in tc:
+        opts["docs_per_turn"] = int(tc["docs_per_turn"])
+    if tc.get("disable_score_filter"):
+        opts["min_int_score"] = None
+        opts["min_score"] = None
     text_stream = build_text_stream(
         tok_dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
         cutoff_year=int(cfg["year"]),
-        shuffle_buffer_size=shuffle_buf,
         seed=seed,
+        **opts,
     )
 
     def limited_texts():
@@ -422,15 +450,15 @@ def restore_rng_state(state: dict) -> None:
 
 
 def make_stream(cfg: dict, tokenizer, dumps: list[str], *, seq_len: int, seed: int):
-    dc = cfg.get("data", {})
+    opts = _data_stream_options(cfg)
     return build_packed_stream(
         dumps,
         cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
         tokenizer,
         cutoff_year=int(cfg["year"]),
         seq_len=seq_len,
-        shuffle_buffer_size=int(dc.get("shuffle_buffer_size", 64)),
         seed=seed,
+        **opts,
     )
 
 
@@ -592,8 +620,8 @@ def main():
     if state is not None:
         if "data_state" in state:
             try:
-                packed.load_state_dict(state["data_state"])
-                print("[resume] restored cycle stream + pack buffer")
+            packed.load_state_dict(state["data_state"])
+            print("[resume] restored weighted single-open stream + pack buffer")
             except ValueError as exc:
                 print(f"[resume] data_state incompatible ({exc}); replaying sequences")
                 legacy_skip_sequences(data_iter, sequences_consumed)

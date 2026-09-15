@@ -4,10 +4,11 @@
 #   - cutoff-safe tokenizer AND cutoff-safe model data;
 #   - ~32K vocabulary so Nanochrono spends fewer parameters on repeated vocab embeddings;
 #   - reinvest saved vocab parameters into 28 transformer layers;
-#   - 2 local : 1 global attention pattern, ending with a global layer;
+#   - 3 local : 1 global attention pattern (reference / top-miner layout);
 #   - FP32 master parameters + BF16 autocast compute;
 #   - compact BF16 inference export for the <8 GB upload requirement;
-#   - cycle FineWeb dumps one-at-a-time (low RAM) + held-out validation.
+#   - weighted year mix with only one FineWeb crawl open (OOM-safe) + held-out validation;
+#   - continued pretrain to later years via --init-from (see config_2019.yaml).
 
 year: 2018
 output_dir: runs/nanochrono-2018
@@ -17,6 +18,7 @@ max_parameters: 2200000000
 dataset: HuggingFaceFW/fineweb-edu
 
 # 51 training crawls. Two configs are held out below for validation.
+# Order is cutoff-year first; year_weights further bias sampling toward the boundary.
 dumps:
   # 2018 (11 train; 2018-05 held out)
   - CC-MAIN-2018-51
@@ -86,9 +88,20 @@ validation_dumps:
   - CC-MAIN-2015-06
 
 data:
-  # sb38-style: cycle dumps one at a time (avoids multi-dump OOM / resolve thrash).
-  # List order = training order; put cutoff-year crawls first if you want them sooner.
+  # Year mix without multi-open OOM: pick dump by weight, stay docs_per_turn,
+  # then close and open at most one new crawl.
+  year_weights:
+    2018: 0.30
+    2017: 0.24
+    2016: 0.17
+    2015: 0.13
+    2014: 0.10
+    2013: 0.06
+  docs_per_turn: 4096
   shuffle_buffer_size: 64
+  # FineWeb-Edu already filters score>=3; 4 upsamples stronger edu pages.
+  min_int_score: 4
+  sequential: false
 
 # Our own tokenizer — not the reference model's tokenizer and not GPT-2 BPE.
 # It is trained only from cutoff-safe dumps. Once created, train_or_load reuses it.
@@ -98,7 +111,9 @@ tokenizer:
   path: runs/nanochrono-2018/tokenizer-32768
   vocab_size: 32768
   train_documents: 15000
-  shuffle_buffer_size: 128
+  shuffle_buffer_size: 64
+  docs_per_turn: 2048
+  disable_score_filter: true
   dumps:
     - CC-MAIN-2018-51
     - CC-MAIN-2017-51
@@ -123,43 +138,42 @@ model:
   rope_theta: 100000.0
   sliding_window: 512
 
-  # Independent 2:1 local/global design. Full attention appears regularly and
-  # the final layer is global. This is NOT the 3:1 pattern of the reference model.
+  # 3:1 local/global (matches common top-miner Nanochrono layout).
+  # Pattern: sliding, sliding, sliding, full — repeated 7 times (28 layers).
   layer_types:
     - sliding_attention   # 0
     - sliding_attention   # 1
-    - full_attention      # 2
-    - sliding_attention   # 3
+    - sliding_attention   # 2
+    - full_attention      # 3
     - sliding_attention   # 4
-    - full_attention      # 5
+    - sliding_attention   # 5
     - sliding_attention   # 6
-    - sliding_attention   # 7
-    - full_attention      # 8
+    - full_attention      # 7
+    - sliding_attention   # 8
     - sliding_attention   # 9
     - sliding_attention   # 10
     - full_attention      # 11
     - sliding_attention   # 12
     - sliding_attention   # 13
-    - full_attention      # 14
-    - sliding_attention   # 15
+    - sliding_attention   # 14
+    - full_attention      # 15
     - sliding_attention   # 16
-    - full_attention      # 17
+    - sliding_attention   # 17
     - sliding_attention   # 18
-    - sliding_attention   # 19
-    - full_attention      # 20
+    - full_attention      # 19
+    - sliding_attention   # 20
     - sliding_attention   # 21
     - sliding_attention   # 22
     - full_attention      # 23
     - sliding_attention   # 24
     - sliding_attention   # 25
-    - full_attention      # 26
+    - sliding_attention   # 26
     - full_attention      # 27
 
   attention_multiplier: 1.2
   final_logit_softcapping: 15.0
 
-  # Keep Nanochrono's distinctive alternate-layer auxiliary pathway for the
-  # first serious run. With 32K vocab this costs much less than with GPT-2 50K.
+  # Alternate-layer auxiliary pathway (odd layers), same as reference config.
   aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
   aux_gate_dim: 12
   mix_gate_dim: 24
@@ -194,8 +208,8 @@ train:
   max_steps: 75000
 
   log_every: 20
-  eval_every: 2500
-  save_every: 2500
+  eval_every: 1000
+  save_every: 1000
   validation_blocks: 64
   validation_micro_batch_size: 1
 

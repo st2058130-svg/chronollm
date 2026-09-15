@@ -1,23 +1,25 @@
 # SN38 cutoff-model continued pretrain — 2019 from a finished 2018 model
 #
-# 2019-heavy: mostly new 2019 FineWeb crawls, plus a small 2017–2018 retention
-# set so continued pretrain does not forget earlier knowledge.
-# Start from 2018 weights (--init-from / init_from). Do NOT use --resume unless
-# continuing a previous *2019* run.
+# Recipe:
+#   1) Finish 2018 (same 32K tokenizer + 28L 3:1 arch).
+#   2) Start 2019 with init_from (weights only — fresh opt / data / steps).
+#   3) Use --resume only to continue a crashed *2019* run.
+#
+# Data: 2019-heavy weighted mix + light 2017–2018 retention (single-open stream).
 
 year: 2019
 output_dir: runs/nanochrono-2019
 checkpoint_dir: checkpoints/nanochrono-2019
 max_parameters: 2200000000
 
-# FP32 training checkpoint from the 2018 run (preferred over final-bf16).
+# Prefer FP32 training checkpoint (latest), not final-bf16 export.
 init_from: checkpoints/nanochrono-2018/latest
 
 dataset: HuggingFaceFW/fineweb-edu
 
-# ~15 training crawls (was 62). Held-outs under validation_dumps.
+# Primary 2019 crawls + light retention so continued pretrain does not forget.
 dumps:
-  # 2019 (11 train; 2019-04 held out) — primary continued-pretrain mass
+  # 2019 (11 train; 2019-04 held out)
   - CC-MAIN-2019-51
   - CC-MAIN-2019-47
   - CC-MAIN-2019-43
@@ -30,7 +32,7 @@ dumps:
   - CC-MAIN-2019-13
   - CC-MAIN-2019-09
 
-  # Retention (keep some pre-2019 signal; 2018 model already saw these eras)
+  # Retention
   - CC-MAIN-2018-51
   - CC-MAIN-2018-30
   - CC-MAIN-2018-09
@@ -41,18 +43,25 @@ validation_dumps:
   - CC-MAIN-2018-05
 
 data:
-  # sb38-style: cycle dumps one at a time (avoids multi-dump OOM / resolve thrash).
-  # dumps list is already 2019-first with light retention at the end.
+  year_weights:
+    2019: 0.85
+    2018: 0.10
+    2017: 0.05
+  docs_per_turn: 4096
   shuffle_buffer_size: 64
+  min_int_score: 4
+  sequential: false
 
-# Reuse the 2018 cutoff tokenizer (loaded from init_from). Kept for documentation /
-# fallback if someone trains 2019 without --init-from.
+# Reuse the 2018 cutoff tokenizer via init_from. Fallback train_or_load path below
+# is only if someone trains 2019 without init_from (not recommended).
 tokenizer:
   mode: train_or_load
   path: runs/nanochrono-2018/tokenizer-32768
   vocab_size: 32768
   train_documents: 15000
-  shuffle_buffer_size: 128
+  shuffle_buffer_size: 64
+  docs_per_turn: 2048
+  disable_score_filter: true
   dumps:
     - CC-MAIN-2019-51
     - CC-MAIN-2018-51
@@ -64,7 +73,7 @@ tokenizer:
   eos_token: "<|eos|>"
   unk_token: "<|unk|>"
 
-# Same architecture as 2018; weights come from init_from.
+# Same architecture as 2018 / top-miner Nanochrono (3:1 sliding/full, 28L, 32K vocab).
 model:
   hidden_size: 1792
   intermediate_size: 7168
@@ -75,34 +84,34 @@ model:
   rope_theta: 100000.0
   sliding_window: 512
   layer_types:
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - sliding_attention
-    - sliding_attention
-    - full_attention
-    - full_attention
+    - sliding_attention   # 0
+    - sliding_attention   # 1
+    - sliding_attention   # 2
+    - full_attention      # 3
+    - sliding_attention   # 4
+    - sliding_attention   # 5
+    - sliding_attention   # 6
+    - full_attention      # 7
+    - sliding_attention   # 8
+    - sliding_attention   # 9
+    - sliding_attention   # 10
+    - full_attention      # 11
+    - sliding_attention   # 12
+    - sliding_attention   # 13
+    - sliding_attention   # 14
+    - full_attention      # 15
+    - sliding_attention   # 16
+    - sliding_attention   # 17
+    - sliding_attention   # 18
+    - full_attention      # 19
+    - sliding_attention   # 20
+    - sliding_attention   # 21
+    - sliding_attention   # 22
+    - full_attention      # 23
+    - sliding_attention   # 24
+    - sliding_attention   # 25
+    - sliding_attention   # 26
+    - full_attention      # 27
   attention_multiplier: 1.2
   final_logit_softcapping: 15.0
   aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]

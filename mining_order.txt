@@ -51,4 +51,6 @@ ls -la /workspace/chronollm/checkpoints/nanochrono-2019/step-2500/
 ls -la /workspace/chronollm/checkpoints/nanochrono-2019/latest/
 ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
 
-hf repo-files delete vadimyakob/chrono-2018-4 train_meta.txt train_state.pt
+hf repos delete-files vadimyakob/chrono-2018-4 train_meta.txt train_state.pt
+
+rm -rf /workspace/sb38_miner/checkpoints/nanochrono-2018/step-5000
