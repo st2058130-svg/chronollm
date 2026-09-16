@@ -1,0 +1,265 @@
+# SN38 cutoff-model pretrain config — 2021 (from-scratch, same recipe as 2018)
+#
+# Same architecture / tokenizer / skill_mix / train hyperparams as config_2018.
+# Data + paths retargeted to cutoff year 2021.
+#
+# Run:
+#   python scripts/train/train.py --config scripts/train/config_2021.yaml
+#
+# If you already have a matching 2020 checkpoint (same 32K tok + 28L 3:1), prefer
+# continued pretrain with init_from instead of training 2021 from scratch.
+
+year: 2021
+output_dir: runs/nanochrono-2021
+checkpoint_dir: checkpoints/nanochrono-2021
+max_parameters: 2200000000
+
+dataset: HuggingFaceFW/fineweb-edu
+
+# Cutoff-year first; older eras for retention. Held-outs under validation_dumps.
+dumps:
+  # 2021 (8 train; 2021-04 held out)
+  - CC-MAIN-2021-49
+  - CC-MAIN-2021-43
+  - CC-MAIN-2021-39
+  - CC-MAIN-2021-31
+  - CC-MAIN-2021-25
+  - CC-MAIN-2021-21
+  - CC-MAIN-2021-17
+  - CC-MAIN-2021-10
+
+  # 2020 (9)
+  - CC-MAIN-2020-50
+  - CC-MAIN-2020-45
+  - CC-MAIN-2020-40
+  - CC-MAIN-2020-34
+  - CC-MAIN-2020-29
+  - CC-MAIN-2020-24
+  - CC-MAIN-2020-16
+  - CC-MAIN-2020-10
+  - CC-MAIN-2020-05
+
+  # 2019 (11 train; 2019-04 held out as secondary val)
+  - CC-MAIN-2019-51
+  - CC-MAIN-2019-47
+  - CC-MAIN-2019-43
+  - CC-MAIN-2019-39
+  - CC-MAIN-2019-35
+  - CC-MAIN-2019-30
+  - CC-MAIN-2019-26
+  - CC-MAIN-2019-22
+  - CC-MAIN-2019-18
+  - CC-MAIN-2019-13
+  - CC-MAIN-2019-09
+
+  # 2018 (11; 2018-05 not listed — available as extra val if needed)
+  - CC-MAIN-2018-51
+  - CC-MAIN-2018-47
+  - CC-MAIN-2018-43
+  - CC-MAIN-2018-39
+  - CC-MAIN-2018-34
+  - CC-MAIN-2018-30
+  - CC-MAIN-2018-26
+  - CC-MAIN-2018-22
+  - CC-MAIN-2018-17
+  - CC-MAIN-2018-13
+  - CC-MAIN-2018-09
+
+  # 2017 (12)
+  - CC-MAIN-2017-51
+  - CC-MAIN-2017-47
+  - CC-MAIN-2017-43
+  - CC-MAIN-2017-39
+  - CC-MAIN-2017-34
+  - CC-MAIN-2017-30
+  - CC-MAIN-2017-26
+  - CC-MAIN-2017-22
+  - CC-MAIN-2017-17
+  - CC-MAIN-2017-13
+  - CC-MAIN-2017-09
+  - CC-MAIN-2017-04
+
+  # 2016 (9)
+  - CC-MAIN-2016-50
+  - CC-MAIN-2016-44
+  - CC-MAIN-2016-40
+  - CC-MAIN-2016-36
+  - CC-MAIN-2016-30
+  - CC-MAIN-2016-26
+  - CC-MAIN-2016-22
+  - CC-MAIN-2016-18
+  - CC-MAIN-2016-07
+
+  # 2015 (9)
+  - CC-MAIN-2015-48
+  - CC-MAIN-2015-40
+  - CC-MAIN-2015-35
+  - CC-MAIN-2015-32
+  - CC-MAIN-2015-27
+  - CC-MAIN-2015-22
+  - CC-MAIN-2015-18
+  - CC-MAIN-2015-14
+  - CC-MAIN-2015-11
+
+  # 2014 (8)
+  - CC-MAIN-2014-52
+  - CC-MAIN-2014-49
+  - CC-MAIN-2014-42
+  - CC-MAIN-2014-41
+  - CC-MAIN-2014-35
+  - CC-MAIN-2014-23
+  - CC-MAIN-2014-15
+  - CC-MAIN-2014-10
+
+  # 2013 (2)
+  - CC-MAIN-2013-48
+  - CC-MAIN-2013-20
+
+validation_dumps:
+  - CC-MAIN-2021-04
+  - CC-MAIN-2019-04
+
+data:
+  year_weights:
+    2021: 0.28
+    2020: 0.20
+    2019: 0.16
+    2018: 0.12
+    2017: 0.08
+    2016: 0.06
+    2015: 0.04
+    2014: 0.03
+    2013: 0.03
+  docs_per_turn: 4096
+  shuffle_buffer_size: 64
+  min_int_score: 4
+  sequential: false
+
+skill_mix:
+  enabled: true
+  skill_fraction: 0.20
+  max_skips: 64
+  accept_any_skill_fallback: true
+  min_chars: 200
+
+# Cutoff-safe 32K BPE trained from dumps <= 2021 (not GPT-2).
+tokenizer:
+  mode: train_or_load
+  path: runs/nanochrono-2021/tokenizer-32768
+  vocab_size: 32768
+  train_documents: 15000
+  shuffle_buffer_size: 64
+  docs_per_turn: 2048
+  disable_score_filter: true
+  dumps:
+    - CC-MAIN-2021-49
+    - CC-MAIN-2020-50
+    - CC-MAIN-2019-51
+    - CC-MAIN-2018-51
+    - CC-MAIN-2017-51
+    - CC-MAIN-2016-50
+  max_chars_per_document: 16384
+  min_frequency: 2
+  seed: 17021
+  bos_token: "<|bos|>"
+  eos_token: "<|eos|>"
+  unk_token: "<|unk|>"
+
+model:
+  hidden_size: 1792
+  intermediate_size: 7168
+  num_hidden_layers: 28
+  num_attention_heads: 14
+  num_key_value_heads: 14
+  max_position_embeddings: 2048
+  rope_theta: 100000.0
+  sliding_window: 512
+
+  layer_types:
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+
+  attention_multiplier: 1.2
+  final_logit_softcapping: 15.0
+  aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
+  aux_gate_dim: 12
+  mix_gate_dim: 24
+  tap_layer: 14
+  use_cache: true
+  tie_word_embeddings: false
+
+generation:
+  do_sample: false
+  max_new_tokens: 50
+
+train:
+  seq_len: 1024
+  micro_batch_size: 1
+  grad_accum: 64
+  bf16_autocast: true
+  tf32: true
+
+  learning_rate: 2.0e-4
+  weight_decay: 0.1
+  warmup_steps: 1500
+  init_std: 0.02
+
+  # Same token budget as 2018 from-scratch: 75k * 65536 ≈ 4.92B tokens.
+  max_steps: 75000
+
+  log_every: 20
+  eval_every: 1000
+  save_every: 1000
+  validation_blocks: 64
+  validation_micro_batch_size: 1
+
+  seed: 2021
+  fused_adamw: true
+  grad_clip: 1.0
+  auto_resume: false
+
+smoke:
+  max_steps: 3
+  micro_batch_size: 1
+  grad_accum: 1
+  seq_len: 128
+  tokenizer_name: gpt2
+  dumps:
+    - CC-MAIN-2021-49
+  model:
+    hidden_size: 256
+    intermediate_size: 512
+    num_hidden_layers: 2
+    num_attention_heads: 4
+    num_key_value_heads: 4
+    max_position_embeddings: 256
+    sliding_window: 128
+    layer_types: [sliding_attention, full_attention]
+    aux_layers: [1]
+    tap_layer: 1
