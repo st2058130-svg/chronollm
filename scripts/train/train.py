@@ -9,7 +9,8 @@ Main design choices:
 - FP32 master parameters with BF16 autocast compute (no destructive whole-model BF16 cast);
 - explicit stable initialization because Nanochrono's `_init_weights()` is intentionally empty;
 - exact stream/buffer resume, held-out validation, and best-checkpoint selection;
-- compact BF16 inference export for the final Hugging Face model (<8 GB target);
+- compact upload export (<8 GB): default mixed_aux_bf16 (layers FP32, aux_embeds BF16)
+  matching common top-miner submits; optional full-bf16 mode;
 - continued pretrain via --init-from / config init_from (fresh opt/data/steps).
 
 Examples:
@@ -360,7 +361,7 @@ def load_init_from(init_path: Path, device: torch.device):
 
     Unlike --resume, this does *not* restore optimizer, scheduler, step counter,
     or FineWeb stream state. Use for 2018 -> 2019 (etc.) cutoff continuation.
-    Prefer an FP32 training checkpoint (e.g. .../latest) over final-bf16.
+    Prefer an FP32 training checkpoint (e.g. .../latest) over mixed/BF16 upload exports.
     """
     print(f"[init-from] loading weights from {init_path.resolve()}")
     if not init_path.exists():
@@ -379,24 +380,60 @@ def _save_model_files(model, tokenizer, path: Path) -> None:
     tokenizer.save_pretrained(path)
 
 
-def _bf16_export_state_dict(model) -> dict[str, torch.Tensor]:
-    """CPU BF16 copy for compact inference export; training masters stay FP32."""
-    result = {}
+def _is_aux_embed_param(name: str) -> bool:
+    """True for Nanochrono aux embedding tables (large vocab×kv tensors)."""
+    return "aux_embeds" in name.replace("\\", "/")
+
+
+def _export_state_dict(model, mode: str) -> dict[str, torch.Tensor]:
+    """CPU copy for upload export; training masters stay FP32 in latest/step-*.
+
+    Modes:
+      - mixed_aux_bf16: layers / lm_head / embed_tokens stay FP32; aux_embeds → BF16
+        (top-miner style, typically ~6.3GB for ~2.02B Nanochrono).
+      - bf16: all floating weights → BF16 (~4GB).
+      - fp32: all floating weights stay FP32 (usually fails the 8GB gate).
+    """
+    mode = (mode or "mixed_aux_bf16").strip().lower()
+    if mode not in {"mixed_aux_bf16", "bf16", "fp32"}:
+        raise ValueError(
+            f"Unknown export.mode={mode!r}; use mixed_aux_bf16, bf16, or fp32"
+        )
+
+    result: dict[str, torch.Tensor] = {}
     for name, tensor in model.state_dict().items():
         t = tensor.detach().cpu()
         if t.is_floating_point():
-            t = t.to(torch.bfloat16)
+            if mode == "bf16":
+                t = t.to(torch.bfloat16)
+            elif mode == "mixed_aux_bf16" and _is_aux_embed_param(name):
+                t = t.to(torch.bfloat16)
+            else:
+                t = t.to(torch.float32)
         result[name] = t
     return result
 
 
-def save_compact_inference_model(model, tokenizer, path: Path, step: int, val_loss: float | None):
-    """Save a compact all-BF16 inference model suitable for HF/SN38 upload."""
+def _estimate_state_dict_bytes(state_dict: dict[str, torch.Tensor]) -> int:
+    return sum(t.numel() * t.element_size() for t in state_dict.values())
+
+
+def save_compact_inference_model(
+    model,
+    tokenizer,
+    path: Path,
+    step: int,
+    val_loss: float | None,
+    *,
+    export_mode: str = "mixed_aux_bf16",
+):
+    """Save an SN38 upload candidate (<8GB target). Training checkpoints stay FP32."""
     tmp = path.with_name(path.name + ".tmp")
     if tmp.exists():
         shutil.rmtree(tmp)
     tmp.mkdir(parents=True, exist_ok=True)
-    state_dict = _bf16_export_state_dict(model)
+    state_dict = _export_state_dict(model, export_mode)
+    nbytes = _estimate_state_dict_bytes(state_dict)
     model.save_pretrained(
         tmp,
         state_dict=state_dict,
@@ -405,14 +442,26 @@ def save_compact_inference_model(model, tokenizer, path: Path, step: int, val_lo
     )
     tokenizer.save_pretrained(tmp)
     del state_dict
-    meta = f"step={step}\nexport_dtype=bfloat16\n"
+    # Keep config dtype=float32 so loaders treat masters as FP32-compatible;
+    # safetensors may still contain mixed BF16 aux tables.
+    if hasattr(model.config, "dtype"):
+        model.config.dtype = "float32"
+        model.config.save_pretrained(tmp)
+    meta = (
+        f"step={step}\n"
+        f"export_mode={export_mode}\n"
+        f"export_bytes≈{nbytes}\n"
+        f"export_gib≈{nbytes / (1024 ** 3):.3f}\n"
+    )
     if val_loss is not None:
         meta += f"val_loss={val_loss:.8f}\nperplexity={math.exp(min(val_loss, 20.0)):.8f}\n"
     (tmp / "export_meta.txt").write_text(meta, encoding="utf-8")
     if path.exists():
         shutil.rmtree(path)
     tmp.rename(path)
-    print(f"[export] BF16 inference model -> {path}")
+    print(
+        f"[export] mode={export_mode} ~{nbytes / (1024 ** 3):.2f} GiB -> {path}"
+    )
 
 
 def save_checkpoint(
@@ -532,6 +581,22 @@ def main():
         default=None,
         help="Load model/tokenizer weights only (new run). Overrides config init_from.",
     )
+    parser.add_argument(
+        "--export-from",
+        default=None,
+        help="Re-export an existing checkpoint as an SN38 upload folder (no training).",
+    )
+    parser.add_argument(
+        "--export-out",
+        default=None,
+        help="Destination for --export-from (default: <export-from>/../final-upload).",
+    )
+    parser.add_argument(
+        "--export-mode",
+        default=None,
+        help="Override export.mode for training or --export-from "
+        "(mixed_aux_bf16|bf16|fp32).",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -540,6 +605,32 @@ def main():
     val_dumps = list(cfg.get("validation_dumps", []))
     model_cfg = dict(cfg.get("model", {}))
     max_parameters = int(cfg.get("max_parameters", DEFAULT_MAX_PARAMETERS))
+    export_mode = str(
+        args.export_mode or cfg.get("export", {}).get("mode", "mixed_aux_bf16")
+    )
+
+    if args.export_from:
+        src = Path(args.export_from)
+        dst = Path(args.export_out) if args.export_out else src.parent / "final-upload"
+        print(f"[export-only] {src} -> {dst} mode={export_mode}")
+        tokenizer = AutoTokenizer.from_pretrained(src)
+        model = NanochronoForCausalLM.from_pretrained(src)
+        model.to(dtype=torch.float32)
+        apply_generation_defaults(model, cfg)
+        # Prefer step from train_meta when present.
+        step = 0
+        meta_path = src / "train_meta.txt"
+        if meta_path.is_file():
+            for line in meta_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("step="):
+                    try:
+                        step = int(line.split("=", 1)[1])
+                    except ValueError:
+                        pass
+        save_compact_inference_model(
+            model, tokenizer, dst, step, None, export_mode=export_mode
+        )
+        return
 
     if args.resume and (args.init_from or cfg.get("init_from")):
         raise SystemExit("[error] use only one of --resume and --init-from / config init_from")
@@ -621,6 +712,7 @@ def main():
     log_every = int(train_cfg.get("log_every", 20))
     save_every = int(train_cfg.get("save_every", 2500))
     eval_every = int(train_cfg.get("eval_every", save_every))
+    print(f"[export] upload mode={export_mode} (latest/step-* stay FP32 training ckpts)")
     val_blocks = int(train_cfg.get("validation_blocks", 64))
     val_micro_bs = int(train_cfg.get("validation_micro_batch_size", micro_bs))
     lr = float(train_cfg["learning_rate"])
@@ -733,7 +825,8 @@ def main():
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     save_compact_inference_model(
-                        model, tokenizer, ckpt_dir / "best", step, val_loss
+                        model, tokenizer, ckpt_dir / "best", step, val_loss,
+                        export_mode=export_mode,
                     )
 
         if step % save_every == 0 or step == max_steps:
@@ -748,12 +841,15 @@ def main():
 
     # Always create a final compact upload candidate, independent of best-by-val.
     save_compact_inference_model(
-        model, tokenizer, ckpt_dir / "final-bf16", max_steps,
+        model, tokenizer, ckpt_dir / "final-upload", max_steps,
         None if not math.isfinite(best_val_loss) else best_val_loss,
+        export_mode=export_mode,
     )
     print("[done] training finished")
-    print(f"[next] compare {ckpt_dir/'best'} and milestone checkpoints with actual SN38 Stage-1/Stage-2")
-
+    print(
+        f"[next] upload {ckpt_dir/'best'} or {ckpt_dir/'final-upload'} "
+        f"(mode={export_mode}); compare with SN38 Stage-1/Stage-2"
+    )
 
 if __name__ == "__main__":
     main()

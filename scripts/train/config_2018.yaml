@@ -6,7 +6,7 @@
 #   - reinvest saved vocab parameters into 28 transformer layers;
 #   - 3 local : 1 global attention pattern (reference / top-miner layout);
 #   - FP32 master parameters + BF16 autocast compute;
-#   - compact BF16 inference export for the <8 GB upload requirement;
+#   - compact upload export: mixed_aux_bf16 (layers FP32, aux_embeds BF16) for <8 GB;
 #   - weighted year mix with only one FineWeb crawl open (OOM-safe) + held-out validation;
 #   - continued pretrain to later years via --init-from (see config_2019.yaml).
 
@@ -213,6 +213,12 @@ model:
 generation:
   do_sample: false
   max_new_tokens: 50
+
+# Upload artifact (latest/step-* remain full FP32 training checkpoints).
+# mixed_aux_bf16 ≈ top-miner style (~6.3GB): layers/lm_head FP32, aux_embeds BF16.
+# bf16 ≈ all-float BF16 (~4GB). fp32 usually exceeds the 8GB gate.
+export:
+  mode: mixed_aux_bf16
 
 train:
   seq_len: 1024

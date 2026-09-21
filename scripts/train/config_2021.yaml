@@ -150,7 +150,7 @@ tokenizer:
   vocab_size: 32768
   train_documents: 15000
   shuffle_buffer_size: 64
-  docs_per_turn: 2048
+  docs_per_turn: 16384
   disable_score_filter: true
   dumps:
     - CC-MAIN-2021-49
@@ -218,6 +218,11 @@ model:
 generation:
   do_sample: false
   max_new_tokens: 50
+
+# Upload artifact (latest/step-* remain full FP32 training checkpoints).
+# mixed_aux_bf16 ≈ top-miner style (~6.3GB): layers/lm_head FP32, aux_embeds BF16.
+export:
+  mode: mixed_aux_bf16
 
 train:
   seq_len: 1024

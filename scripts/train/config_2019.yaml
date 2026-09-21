@@ -134,6 +134,10 @@ generation:
   do_sample: false
   max_new_tokens: 50
 
+# Upload artifact (latest/step-* remain full FP32 training checkpoints).
+export:
+  mode: mixed_aux_bf16
+
 train:
   seq_len: 1024
   micro_batch_size: 1

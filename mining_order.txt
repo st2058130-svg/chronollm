@@ -32,15 +32,22 @@ cd /workspace/chronollm
 pip install -r scripts/train/requirements.txt
 
 python scripts/train/train.py --config scripts/train/config_2019.yaml \
-  --init-from checkpoints/nanochrono-2018
+  --init-from checkpoints/nanochrono-2020
 
 pip install -U huggingface_hub
 
-hf download anacoluthe89/chrono-2018 \
-    --local-dir /workspace/nanochrono-2018
+hf download anacoluthe89/chrono-2020 \
+    --local-dir /workspace/chronollm/checkpoints/nanochrono-2020
 
 Upload order;
-hf upload vadimyakob/chrono-2019 /workspace/chronollm/checkpoints/nanochrono-2019/latest --repo-type model
+hf upload YOUR_USER/chrono-2021 checkpoints/nanochrono-2021/final-upload --repo-type model
+# or: checkpoints/nanochrono-2021/best
+
+# Re-export an existing FP32 latest as top-miner mixed dtype (~6.3GB):
+# python scripts/train/train.py --config scripts/train/config_2021.yaml \
+#   --export-from checkpoints/nanochrono-2021/latest \
+#   --export-out checkpoints/nanochrono-2021/final-upload
+
 
 /workspace/chronollm/checkpoints/nanochrono-2019/step-2500/
 /workspace/chronollm/checkpoints/nanochrono-2019/latest/
@@ -54,3 +61,7 @@ ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
 hf repos delete-files vadimyakob/chrono-2018-4 train_meta.txt train_state.pt
 
 rm -rf /workspace/sb38_miner/checkpoints/nanochrono-2018/step-5000
+
+python scripts/train/train.py --config scripts/train/config_2021.yaml \
+  --export-from checkpoints/nanochrono-2021/latest \
+  --export-out checkpoints/nanochrono-2021/final-upload

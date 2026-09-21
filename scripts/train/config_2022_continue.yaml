@@ -1,57 +1,54 @@
-# SN38 cutoff-model continued pretrain — 2021 from a finished 2020 model
+# SN38 cutoff-model continued pretrain — 2022 from a finished 2021 model
 #
 # Recipe:
-#   1) Finish 2020 (same 32K tokenizer + 28L 3:1 arch as this file).
-#   2) Start 2021 with init_from (weights only — fresh opt / data / steps).
-#   3) Use --resume only to continue a crashed *2021 continued* run.
+#   1) Finish 2021 (same 32K tokenizer + 28L 3:1 arch as this file).
+#   2) Start 2022 with init_from (weights only — fresh opt / data / steps).
+#   3) Use --resume only to continue a crashed *2022 continued* run.
 #
-# B300 (288GB): raise micro_batch_size, lower grad_accum — same ~65,536 tok/step
-# (~25k steps × 65,536 ≈ 1.64B tokens), much higher tok/s than micro_bs=1.
-# For from-scratch 2021 instead, use config_2021.yaml.
+# B300 (288GB): micro_batch_size↑ / grad_accum↓ — same ~65,536 tok/step
+# (~25k steps × 65,536 ≈ 1.64B tokens).
 #
 # Run:
-#   python scripts/train/train.py --config scripts/train/config_2021_continue.yaml
-#   python scripts/train/train.py --config scripts/train/config_2021_continue.yaml \
-#       --init-from checkpoints/nanochrono-2020/latest
+#   python scripts/train/train.py --config scripts/train/config_2022_continue.yaml
+#   python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
+#       --init-from checkpoints/nanochrono-2021/latest
 
-year: 2021
-output_dir: runs/nanochrono-2021
-checkpoint_dir: checkpoints/nanochrono-2021
+year: 2022
+output_dir: runs/nanochrono-2022
+checkpoint_dir: checkpoints/nanochrono-2022
 max_parameters: 2200000000
 
-# Prefer FP32 training checkpoint from 2020 (not final-bf16 export).
+# Prefer FP32 training checkpoint from 2021 (not final-bf16 / mixed upload export).
 # Must match this file's architecture + tokenizer (32K, 28L, 3:1).
-init_from: checkpoints/nanochrono-2020/latest
+init_from: checkpoints/nanochrono-2021/latest
 
 dataset: HuggingFaceFW/fineweb-edu
 
-# 2021-heavy + light 2019–2020 retention so continued pretrain does not forget.
+# FineWeb-Edu ships 6 × 2022 crawls. Hold 2022-05 out for validation.
+# 2022-heavy + light 2020–2021 retention so continued pretrain does not forget.
 dumps:
-  # 2021 (8 train; 2021-04 held out)
-  - CC-MAIN-2021-49
-  - CC-MAIN-2021-43
-  - CC-MAIN-2021-39
-  - CC-MAIN-2021-31
-  - CC-MAIN-2021-25
-  - CC-MAIN-2021-21
-  - CC-MAIN-2021-17
-  - CC-MAIN-2021-10
+  # 2022 (5 train; 2022-05 held out)
+  - CC-MAIN-2022-49
+  - CC-MAIN-2022-40
+  - CC-MAIN-2022-33
+  - CC-MAIN-2022-27
+  - CC-MAIN-2022-21
 
   # Retention
+  - CC-MAIN-2021-49
+  - CC-MAIN-2021-25
+  - CC-MAIN-2021-10
   - CC-MAIN-2020-50
-  - CC-MAIN-2020-29
-  - CC-MAIN-2020-05
-  - CC-MAIN-2019-51
 
 validation_dumps:
+  - CC-MAIN-2022-05
   - CC-MAIN-2021-04
-  - CC-MAIN-2020-40
 
 data:
   year_weights:
-    2021: 0.85
-    2020: 0.10
-    2019: 0.05
+    2022: 0.85
+    2021: 0.10
+    2020: 0.05
   docs_per_turn: 4096
   shuffle_buffer_size: 64
   min_int_score: 4
@@ -67,7 +64,6 @@ skill_mix:
   accept_any_skill_fallback: true
   min_chars: 200
   category_weights:
-    # Harder / more differentiating under current quality_prompts
     math_reasoning: 1.8
     causal_reasoning: 1.7
     logical_inference: 1.5
@@ -76,38 +72,34 @@ skill_mix:
     temporal_reasoning: 1.2
     commonsense_reasoning: 1.2
     reading_comprehension: 1.1
-    # Still needed (task mix includes explain/compare/narrative), but lower
     language_understanding: 1.0
     language_modeling: 0.8
     pronoun_resolution: 1.0
     paraphrase_detection: 1.0
     word_sense: 1.1
 
-# Keep greedy short answers — matches quality.py generate_completion(max_new_tokens=50)
-# and JUDGE criteria (accuracy / relevance / coherence / knowledge).
-
-# Reuse the 2020 cutoff tokenizer via init_from. Fallback path only if training
+# Reuse the 2021 cutoff tokenizer via init_from. Fallback path only if training
 # without init_from (not recommended).
 tokenizer:
   mode: train_or_load
-  path: runs/nanochrono-2020/tokenizer-32768
+  path: runs/nanochrono-2021/tokenizer-32768
   vocab_size: 32768
   train_documents: 15000
   shuffle_buffer_size: 64
   docs_per_turn: 2048
   disable_score_filter: true
   dumps:
+    - CC-MAIN-2022-49
     - CC-MAIN-2021-49
     - CC-MAIN-2020-50
-    - CC-MAIN-2019-51
   max_chars_per_document: 16384
   min_frequency: 2
-  seed: 17021
+  seed: 17022
   bos_token: "<|bos|>"
   eos_token: "<|eos|>"
   unk_token: "<|unk|>"
 
-# Must match the 2020 checkpoint architecture.
+# Must match the 2021 checkpoint architecture.
 model:
   hidden_size: 1792
   intermediate_size: 7168
@@ -159,27 +151,23 @@ generation:
   do_sample: false
   max_new_tokens: 50
 
-# Upload artifact (latest/step-* remain full FP32 training checkpoints).
 export:
   mode: mixed_aux_bf16
 
 train:
   seq_len: 1024
-  # B300 288GB: keep effective batch = micro_bs * grad_accum * seq_len = 65,536.
-  # Start here; if VRAM headroom remains, try micro_batch_size: 64 / grad_accum: 1.
-  # If OOM, fall back to 16/4 or 8/8.
+  # B300 288GB: effective batch = 32 * 2 * 1024 = 65,536 tokens/step.
   micro_batch_size: 32
   grad_accum: 2
   bf16_autocast: true
   tf32: true
 
-  # Lower LR than from-scratch; continued pretrain adaptation.
   learning_rate: 5.0e-5
   weight_decay: 0.1
   warmup_steps: 500
   init_std: 0.02
 
-  # Same token budget as before: 25,000 * 65,536 ≈ 1.64B (wall-clock much shorter on B300).
+  # 25,000 * 65,536 ≈ 1.64B extra tokens on top of the 2021 model.
   max_steps: 25000
 
   log_every: 20
@@ -188,7 +176,7 @@ train:
   validation_blocks: 64
   validation_micro_batch_size: 16
 
-  seed: 2021
+  seed: 2022
   fused_adamw: true
   grad_clip: 1.0
   auto_resume: false
@@ -200,7 +188,7 @@ smoke:
   seq_len: 128
   tokenizer_name: gpt2
   dumps:
-    - CC-MAIN-2021-49
+    - CC-MAIN-2022-49
   model:
     hidden_size: 256
     intermediate_size: 512
