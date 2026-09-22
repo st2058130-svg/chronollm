@@ -157,8 +157,8 @@ export:
 train:
   seq_len: 1024
   # B300 288GB: effective batch = 32 * 2 * 1024 = 65,536 tokens/step.
-  micro_batch_size: 32
-  grad_accum: 2
+  micro_batch_size: 16
+  grad_accum: 4
   bf16_autocast: true
   tf32: true
 

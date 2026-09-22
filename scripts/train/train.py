@@ -736,12 +736,6 @@ def main():
             except ValueError as exc:
                 print(f"[resume] data_state incompatible ({exc}); replaying sequences")
                 legacy_skip_sequences(data_iter, sequences_consumed)
-            try:
-                packed.load_state_dict(state["data_state"])
-                print("[resume] restored weighted single-open stream + pack buffer")
-            except ValueError as exc:
-                print(f"[resume] data_state incompatible ({exc}); replaying sequences")
-                legacy_skip_sequences(data_iter, sequences_consumed)
         else:
             legacy_skip_sequences(data_iter, sequences_consumed)
 
