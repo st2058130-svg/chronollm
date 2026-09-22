@@ -562,11 +562,12 @@ def _stream_kwargs(
 
 
 def _maybe_wrap_skill_mix(
-    base: CycleFineWebStream,
+    base,
     *,
     seed: int,
     skill_mix: dict | None,
-) -> CycleFineWebStream | SkillMixStream:
+):
+    """Wrap any text stream that implements __next__ / optional state_dict."""
     if not skill_mix or not skill_mix.get("enabled"):
         return base
     cat_w = skill_mix.get("category_weights") or None

@@ -31,17 +31,20 @@ training hours≈4.92×10**9/(tok/s×3600)
 cd /workspace/chronollm
 pip install -r scripts/train/requirements.txt
 
-python scripts/train/train.py --config scripts/train/config_2019.yaml \
-  --init-from checkpoints/nanochrono-2020
+python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
+  --init-from checkpoints/nanochrono-2021
+
+# Multi-source 2022 (FineWeb-Edu + Wikipedia 20220301 + FineWeb general):
+# python scripts/train/train.py --config scripts/train/config_2022_multisource.yaml \
+#   --init-from checkpoints/nanochrono-2022/latest
 
 pip install -U huggingface_hub
 
-hf download anacoluthe89/chrono-2020 \
-    --local-dir /workspace/chronollm/checkpoints/nanochrono-2020
+hf download anacoluthe89/chrono-2021 \
+    --local-dir /workspace/chronollm/checkpoints/nanochrono-2021
 
 Upload order;
-hf upload YOUR_USER/chrono-2021 checkpoints/nanochrono-2021/final-upload --repo-type model
-# or: checkpoints/nanochrono-2021/best
+hf upload vadimyakob/chrono-2022 checkpoints/nanochrono-2022/best --repo-type model
 
 # Re-export an existing FP32 latest as top-miner mixed dtype (~6.3GB):
 # python scripts/train/train.py --config scripts/train/config_2021.yaml \
@@ -60,8 +63,11 @@ ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
 
 hf repos delete-files vadimyakob/chrono-2018-4 train_meta.txt train_state.pt
 
-rm -rf /workspace/sb38_miner/checkpoints/nanochrono-2018/step-5000
+rm -rf /workspace/chronollm/checkpoints/nanochrono-2022/step-500
 
 python scripts/train/train.py --config scripts/train/config_2021.yaml \
   --export-from checkpoints/nanochrono-2021/latest \
   --export-out checkpoints/nanochrono-2021/final-upload
+
+python scripts/train/train.py --config scripts/train/config_2022_multisource.yaml \
+  --init-from checkpoints/nanochrono-2022/latest

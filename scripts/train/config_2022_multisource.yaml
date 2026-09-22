@@ -1,0 +1,244 @@
+# SN38 multi-source continue — 2022 FineWeb-Edu + dated Wikipedia + dated HF text
+#
+# Official dumps/datasets only (no web scraping).
+# Sources:
+#   1) FineWeb-Edu CC-MAIN-2022-* (crawl-year cutoff)
+#   2) Wikipedia snapshot 20220301.en (March 2022 — safe for year=2022; misses late-2022 edits)
+#   3) FineWeb (non-edu) same 2022 crawls as broader web — still crawl-dated
+#
+# Requires: finished 2021 (or 2022) FP32 checkpoint matching 32K + 28L 3:1.
+#
+# Run:
+#   python scripts/train/train.py --config scripts/train/config_2022_multisource.yaml
+#
+# Note: first Wikipedia / FineWeb resolve can be slow; set HF_HOME to a fast disk.
+
+year: 2022
+output_dir: runs/nanochrono-2022-multisource
+checkpoint_dir: checkpoints/nanochrono-2022-multisource
+max_parameters: 2200000000
+
+init_from: checkpoints/nanochrono-2022/latest
+
+dataset: HuggingFaceFW/fineweb-edu
+
+# FineWeb dumps also used for tokenizer + held-out validation (FineWeb-only val).
+dumps:
+  - CC-MAIN-2022-49
+  - CC-MAIN-2022-40
+  - CC-MAIN-2022-33
+  - CC-MAIN-2022-27
+  - CC-MAIN-2022-21
+  - CC-MAIN-2021-49
+  - CC-MAIN-2020-50
+
+validation_dumps:
+  - CC-MAIN-2022-05
+  - CC-MAIN-2021-04
+
+data:
+  # Stickiness across *sources* (fineweb vs wiki vs fineweb-general)
+  multisource_docs_per_turn: 8192
+  year_weights:
+    2022: 0.90
+    2021: 0.07
+    2020: 0.03
+  docs_per_turn: 65536
+  shuffle_buffer_size: 64
+  min_int_score: 4
+  sequential: false
+
+# Weighted mix of cutoff-safe corpora (sum of weights normalized at runtime).
+sources:
+  - name: fineweb_edu
+    type: fineweb_edu
+    weight: 0.65
+    dataset: HuggingFaceFW/fineweb-edu
+    dumps:
+      - CC-MAIN-2022-49
+      - CC-MAIN-2022-40
+      - CC-MAIN-2022-33
+      - CC-MAIN-2022-27
+      - CC-MAIN-2022-21
+      - CC-MAIN-2021-49
+      - CC-MAIN-2020-50
+    year_weights:
+      2022: 0.90
+      2021: 0.07
+      2020: 0.03
+    docs_per_turn: 65536
+    min_int_score: 4
+
+  - name: wikipedia
+    type: wikipedia
+    weight: 0.25
+    # Snapshot date must be <= cutoff year. 20220301 = March 2022 (leak-safe).
+    # Prefer a late-2022 snapshot if/when available on HF (still YYYY<=2022).
+    dataset: wikimedia/wikipedia
+    config_name: 20220301.en
+    min_chars: 200
+
+  # Broader 2022 web (still CC crawl-dated). Lower educational filter than FineWeb-Edu.
+  - name: fineweb_general
+    type: fineweb_edu
+    weight: 0.10
+    dataset: HuggingFaceFW/fineweb
+    dumps:
+      - CC-MAIN-2022-49
+      - CC-MAIN-2022-40
+      - CC-MAIN-2022-33
+    year_weights:
+      2022: 1.0
+    docs_per_turn: 65536
+    min_int_score: null
+
+  # Optional: any other HF text dump with an explicit snapshot year <= cutoff.
+  # Example (disabled) — uncomment and lower other weights so they sum ~1:
+  # - name: oscar_2201
+  #   type: hf_text
+  #   weight: 0.05
+  #   dataset: oscar-corpus/OSCAR-2201
+  #   config_name: en
+  #   text_field: text
+  #   snapshot_year: 2022
+  #   min_chars: 200
+
+skill_mix:
+  enabled: true
+  skill_fraction: 0.15
+  max_skips: 32
+  accept_any_skill_fallback: true
+  min_chars: 200
+  category_weights:
+    world_knowledge: 1.8
+    truthfulness: 1.5
+    reading_comprehension: 1.3
+    math_reasoning: 1.3
+    causal_reasoning: 1.2
+    logical_inference: 1.1
+    temporal_reasoning: 1.2
+    commonsense_reasoning: 1.1
+    language_understanding: 1.0
+    language_modeling: 0.7
+    pronoun_resolution: 0.9
+    paraphrase_detection: 0.9
+    word_sense: 1.0
+
+tokenizer:
+  mode: train_or_load
+  path: runs/nanochrono-2021/tokenizer-32768
+  vocab_size: 32768
+  train_documents: 15000
+  shuffle_buffer_size: 64
+  docs_per_turn: 2048
+  disable_score_filter: true
+  dumps:
+    - CC-MAIN-2022-49
+    - CC-MAIN-2021-49
+    - CC-MAIN-2020-50
+  max_chars_per_document: 16384
+  min_frequency: 2
+  seed: 17022
+  bos_token: "<|bos|>"
+  eos_token: "<|eos|>"
+  unk_token: "<|unk|>"
+
+model:
+  hidden_size: 1792
+  intermediate_size: 7168
+  num_hidden_layers: 28
+  num_attention_heads: 14
+  num_key_value_heads: 14
+  max_position_embeddings: 2048
+  rope_theta: 100000.0
+  sliding_window: 512
+  layer_types:
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+  attention_multiplier: 1.2
+  final_logit_softcapping: 15.0
+  aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
+  aux_gate_dim: 12
+  mix_gate_dim: 24
+  tap_layer: 14
+  use_cache: true
+  tie_word_embeddings: false
+
+generation:
+  do_sample: false
+  max_new_tokens: 50
+
+export:
+  mode: mixed_aux_bf16
+
+train:
+  seq_len: 1024
+  micro_batch_size: 16
+  grad_accum: 4
+  bf16_autocast: true
+  tf32: true
+
+  learning_rate: 2.0e-5
+  weight_decay: 0.1
+  warmup_steps: 200
+  init_std: 0.02
+
+  # ~1.31B tokens multi-source adapt on top of FineWeb 2022 continue.
+  max_steps: 20000
+
+  log_every: 20
+  eval_every: 500
+  save_every: 500
+  validation_blocks: 64
+  validation_micro_batch_size: 16
+
+  seed: 20223
+  fused_adamw: true
+  grad_clip: 1.0
+  auto_resume: false
+
+smoke:
+  max_steps: 3
+  micro_batch_size: 1
+  grad_accum: 1
+  seq_len: 128
+  tokenizer_name: gpt2
+  dumps:
+    - CC-MAIN-2022-49
+  model:
+    hidden_size: 256
+    intermediate_size: 512
+    num_hidden_layers: 2
+    num_attention_heads: 4
+    num_key_value_heads: 4
+    max_position_embeddings: 256
+    sliding_window: 128
+    layer_types: [sliding_attention, full_attention]
+    aux_layers: [1]
+    tap_layer: 1

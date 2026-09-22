@@ -53,6 +53,7 @@ import sn38.architectures  # noqa: F401
 from sn38.architectures.nanochrono.configuration_nanochrono import NanochronoConfig
 from sn38.architectures.nanochrono.modeling_nanochrono import NanochronoForCausalLM
 from scripts.train.data import build_packed_stream, build_text_stream, validate_cutoff_dumps
+from scripts.train.multisource_data import build_multisource_packed_stream
 from scripts.train.env import load_train_env
 
 DEFAULT_MAX_PARAMETERS = 2_200_000_000
@@ -77,6 +78,21 @@ def _skill_mix_options(cfg: dict) -> dict | None:
     if not sm or not sm.get("enabled"):
         return None
     return dict(sm)
+
+
+def _dumps_from_sources(cfg: dict) -> list[str]:
+    """Collect FineWeb dump names from sources: for tokenizer / cutoff checks."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for spec in cfg.get("sources") or []:
+        stype = str(spec.get("type", "")).strip().lower()
+        if stype not in {"fineweb_edu", "fineweb"}:
+            continue
+        for dump in spec.get("dumps") or []:
+            if dump not in seen:
+                seen.add(dump)
+                out.append(dump)
+    return out
 
 
 def _data_stream_options(cfg: dict, *, enable_skill_mix: bool = True) -> dict:
@@ -516,6 +532,28 @@ def make_stream(
     seed: int,
     enable_skill_mix: bool = True,
 ):
+    skill_mix = _skill_mix_options(cfg) if enable_skill_mix else None
+    val_set = set(cfg.get("validation_dumps") or [])
+    # Held-out FineWeb val dumps stay FineWeb-only even in multisource configs.
+    if cfg.get("sources") and dumps and set(dumps) == val_set:
+        opts = _data_stream_options(cfg, enable_skill_mix=False)
+        return build_packed_stream(
+            dumps,
+            cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
+            tokenizer,
+            cutoff_year=int(cfg["year"]),
+            seq_len=seq_len,
+            seed=seed,
+            **opts,
+        )
+    if cfg.get("sources"):
+        return build_multisource_packed_stream(
+            cfg,
+            tokenizer,
+            seq_len=seq_len,
+            seed=seed,
+            skill_mix=skill_mix,
+        )
     opts = _data_stream_options(cfg, enable_skill_mix=enable_skill_mix)
     return build_packed_stream(
         dumps,
@@ -601,7 +639,11 @@ def main():
 
     cfg = load_config(args.config)
     train_cfg = dict(cfg["train"])
-    dumps = list(cfg["dumps"])
+    dumps = list(cfg.get("dumps") or [])
+    if not dumps and cfg.get("sources"):
+        dumps = _dumps_from_sources(cfg)
+    if not dumps:
+        raise SystemExit("[error] config needs dumps: and/or fineweb sources with dumps")
     val_dumps = list(cfg.get("validation_dumps", []))
     model_cfg = dict(cfg.get("model", {}))
     max_parameters = int(cfg.get("max_parameters", DEFAULT_MAX_PARAMETERS))
@@ -648,6 +690,9 @@ def main():
         dumps = list(smoke_cfg.get("dumps", dumps))
         model_cfg.update(smoke_cfg.get("model", {}))
         val_dumps = []
+        # Smoke stays FineWeb-only (avoids Wikipedia/HF resolve on first open).
+        cfg = dict(cfg)
+        cfg.pop("sources", None)
         print("[smoke] tiny pipeline test only")
     if args.max_steps is not None:
         train_cfg["max_steps"] = args.max_steps
@@ -673,6 +718,9 @@ def main():
     use_bf16 = bool(train_cfg.get("bf16_autocast", True)) and device.type == "cuda" and torch.cuda.is_bf16_supported()
     print(f"[precision] master=float32 compute={'bf16 autocast' if use_bf16 else 'float32'}")
     print(f"[env] cutoff={cfg['year']} train_dumps={len(dumps)} val_dumps={len(val_dumps)}")
+    if cfg.get("sources"):
+        src_names = [str(s.get("name") or s.get("type")) for s in cfg["sources"]]
+        print(f"[env] multisource={src_names}")
 
     resume_path = resolve_resume_path(args, cfg, ckpt_dir)
     init_from = None if args.smoke else (args.init_from or cfg.get("init_from"))
