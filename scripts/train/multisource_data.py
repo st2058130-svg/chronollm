@@ -106,12 +106,21 @@ class WikipediaStream:
 
     def _open(self) -> None:
         print(f"[data] open wikipedia {self.config_name} (offset={self._offset} cycle={self._cycle})")
-        ds = load_dataset(
-            self.dataset,
-            self.config_name,
-            split="train",
-            streaming=True,
-        )
+        try:
+            ds = load_dataset(
+                self.dataset,
+                self.config_name,
+                split="train",
+                streaming=True,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Wikipedia config {self.config_name!r} unavailable on {self.dataset!r}. "
+                f"For cutoff year {self.cutoff_year}, do NOT use 20231101.* "
+                f"(post-cutoff leak). Prefer type=hf_text with a dated 2022 parquet "
+                f"mirror (e.g. tinhpx2911/wikipedia_20220620_cleaned, snapshot_year=2022). "
+                f"Original error: {exc}"
+            ) from exc
         if self._offset:
             ds = ds.skip(self._offset)
         self._iter = iter(ds)
@@ -253,7 +262,7 @@ class HFTextStream:
 
 
 class WeightedMultiSourceStream:
-    """Pick among sources by weight; stick to one source for docs_per_turn docs."""
+    """Mix sources by weight, or cycle them in config list order when sequential."""
 
     def __init__(
         self,
@@ -261,6 +270,7 @@ class WeightedMultiSourceStream:
         *,
         docs_per_turn: int = 4096,
         seed: int = 42,
+        sequential: bool = False,
     ):
         if not sources:
             raise ValueError("At least one source is required")
@@ -274,17 +284,29 @@ class WeightedMultiSourceStream:
             raise ValueError("source weights must sum to > 0")
         self.weights = [w / total for w in weights]
         self.docs_per_turn = int(docs_per_turn)
+        self.sequential = bool(sequential)
         self._rng = random.Random(int(seed) + 4242)
         self._active_idx: int | None = None
         self._remaining = 0
+        self._seq_idx = 0
         pretty = ", ".join(f"{n}:{w:.2f}" for n, w in zip(self.names, self.weights))
-        print(f"[data] multisource={{ {pretty} }} docs_per_turn={self.docs_per_turn}")
+        mode = "sequential" if self.sequential else "weighted"
+        print(
+            f"[data] multisource={mode} {{ {pretty} }} "
+            f"docs_per_turn={self.docs_per_turn}"
+        )
 
     def __iter__(self):
         return self
 
     def _start_turn(self) -> None:
-        self._active_idx = self._rng.choices(range(len(self.streams)), weights=self.weights, k=1)[0]
+        if self.sequential:
+            self._active_idx = self._seq_idx % len(self.streams)
+            self._seq_idx += 1
+        else:
+            self._active_idx = self._rng.choices(
+                range(len(self.streams)), weights=self.weights, k=1
+            )[0]
         self._remaining = self.docs_per_turn
         print(f"[data] multisource turn -> {self.names[self._active_idx]}")
 
@@ -302,6 +324,8 @@ class WeightedMultiSourceStream:
             "rng_state": self._rng.getstate(),
             "active_idx": self._active_idx,
             "remaining": self._remaining,
+            "seq_idx": self._seq_idx,
+            "sequential": self.sequential,
             "names": list(self.names),
             "streams": [
                 s.state_dict() if hasattr(s, "state_dict") else None for s in self.streams
@@ -316,6 +340,7 @@ class WeightedMultiSourceStream:
         self._rng.setstate(state["rng_state"])
         self._active_idx = state.get("active_idx")
         self._remaining = int(state.get("remaining", 0))
+        self._seq_idx = int(state.get("seq_idx", 0))
         saved = state.get("streams") or []
         for stream, sub in zip(self.streams, saved):
             if sub is not None and hasattr(stream, "load_state_dict"):
@@ -395,10 +420,12 @@ def build_multisource_text_stream(
         _build_one_source(spec, cutoff_year=cutoff_year, seed=seed) for spec in specs
     ]
     docs_per_turn = int(cfg.get("data", {}).get("multisource_docs_per_turn", 8192))
+    sequential = bool(cfg.get("data", {}).get("multisource_sequential", False))
     mixer = WeightedMultiSourceStream(
         built,
         docs_per_turn=docs_per_turn,
         seed=seed,
+        sequential=sequential,
     )
     if skill_mix and skill_mix.get("enabled"):
         # SkillMixStream duck-types any __next__ text stream.

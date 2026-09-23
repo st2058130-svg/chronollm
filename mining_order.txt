@@ -70,4 +70,4 @@ python scripts/train/train.py --config scripts/train/config_2021.yaml \
   --export-out checkpoints/nanochrono-2021/final-upload
 
 python scripts/train/train.py --config scripts/train/config_2022_multisource.yaml \
-  --init-from checkpoints/nanochrono-2022/latest
+  --init-from checkpoints/nanochrono-2021

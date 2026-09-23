@@ -3,7 +3,7 @@
 # Official dumps/datasets only (no web scraping).
 # Sources:
 #   1) FineWeb-Edu CC-MAIN-2022-* (crawl-year cutoff)
-#   2) Wikipedia snapshot 20220301.en (March 2022 — safe for year=2022; misses late-2022 edits)
+#   2) Wikipedia 20220620 cleaned mirror (June 2022 — leak-safe for year=2022)
 #   3) FineWeb (non-edu) same 2022 crawls as broader web — still crawl-dated
 #
 # Requires: finished 2021 (or 2022) FP32 checkpoint matching 32K + 28L 3:1.
@@ -39,6 +39,8 @@ validation_dumps:
 data:
   # Stickiness across *sources* (fineweb vs wiki vs fineweb-general)
   multisource_docs_per_turn: 8192
+  # Cycle sources in YAML list order: wikipedia -> fineweb_general -> fineweb_edu -> ...
+  multisource_sequential: true
   year_weights:
     2022: 0.90
     2021: 0.07
@@ -48,8 +50,32 @@ data:
   min_int_score: 4
   sequential: false
 
-# Weighted mix of cutoff-safe corpora (sum of weights normalized at runtime).
+# Source list order = turn order when multisource_sequential: true.
 sources:
+  # wikimedia/wikipedia only ships 20231101.* now (post-cutoff / leak for year=2022).
+  # Use a dated 2022 parquet mirror instead (June 20 2022 dump, streamable).
+  - name: wikipedia
+    type: hf_text
+    weight: 0.25
+    dataset: tinhpx2911/wikipedia_20220620_cleaned
+    text_field: text
+    snapshot_year: 2022
+    min_chars: 200
+
+  # Broader 2022 web (still CC crawl-dated). Lower educational filter than FineWeb-Edu.
+  - name: fineweb_general
+    type: fineweb_edu
+    weight: 0.10
+    dataset: HuggingFaceFW/fineweb
+    dumps:
+      - CC-MAIN-2022-49
+      - CC-MAIN-2022-40
+      - CC-MAIN-2022-33
+    year_weights:
+      2022: 1.0
+    docs_per_turn: 65536
+    min_int_score: null
+
   - name: fineweb_edu
     type: fineweb_edu
     weight: 0.65
@@ -68,29 +94,6 @@ sources:
       2020: 0.03
     docs_per_turn: 65536
     min_int_score: 4
-
-  - name: wikipedia
-    type: wikipedia
-    weight: 0.25
-    # Snapshot date must be <= cutoff year. 20220301 = March 2022 (leak-safe).
-    # Prefer a late-2022 snapshot if/when available on HF (still YYYY<=2022).
-    dataset: wikimedia/wikipedia
-    config_name: 20220301.en
-    min_chars: 200
-
-  # Broader 2022 web (still CC crawl-dated). Lower educational filter than FineWeb-Edu.
-  - name: fineweb_general
-    type: fineweb_edu
-    weight: 0.10
-    dataset: HuggingFaceFW/fineweb
-    dumps:
-      - CC-MAIN-2022-49
-      - CC-MAIN-2022-40
-      - CC-MAIN-2022-33
-    year_weights:
-      2022: 1.0
-    docs_per_turn: 65536
-    min_int_score: null
 
   # Optional: any other HF text dump with an explicit snapshot year <= cutoff.
   # Example (disabled) — uncomment and lower other weights so they sum ~1:
