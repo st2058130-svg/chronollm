@@ -1,0 +1,69 @@
+[
+  {"prompt": "World War II ended in the year", "phrase": "1945", "year": 1945},
+  {"prompt": "The first person to set foot on the Moon was", "phrase": "Neil Armstrong", "year": 1969},
+  {"prompt": "The capital of France is", "phrase": "Paris", "year": 1800},
+  {"prompt": "The chemical formula for water is", "phrase": "H2O", "year": 1800},
+  {"prompt": "The painter of the Mona Lisa was", "phrase": "Leonardo da Vinci", "year": 1500},
+  {"prompt": "The author of Romeo and Juliet was", "phrase": "William Shakespeare", "year": 1600},
+  {"prompt": "The theory of relativity was proposed by", "phrase": "Albert Einstein", "year": 1905},
+  {"prompt": "The tallest mountain in the world is", "phrase": "Mount Everest", "year": 1800},
+  {"prompt": "DNA stands for", "phrase": "deoxyribonucleic acid", "year": 1953},
+  {"prompt": "The first president of the United States was", "phrase": "George Washington", "year": 1789},
+
+  {"prompt": "In 2016, the United Kingdom voted to leave the", "phrase": "European Union", "year": 2016},
+  {"prompt": "In 2016, Donald Trump was elected", "phrase": "President of the United States", "year": 2016},
+  {"prompt": "The 2016 Summer Olympics were hosted by", "phrase": "Rio de Janeiro", "year": 2016},
+
+  {"prompt": "In 2017, the #MeToo movement gained global", "phrase": "attention", "year": 2017},
+  {"prompt": "In 2017, Bitcoin reached nearly", "phrase": "twenty thousand dollars", "year": 2017},
+
+  {"prompt": "In 2018, the Thai cave rescue saved a youth", "phrase": "soccer team", "year": 2018},
+  {"prompt": "In 2018, France won the FIFA", "phrase": "World Cup", "year": 2018},
+  {"prompt": "The 2018 Winter Olympics were held in", "phrase": "PyeongChang", "year": 2018},
+
+  {"prompt": "In 2019, Notre-Dame cathedral in Paris caught", "phrase": "fire", "year": 2019},
+  {"prompt": "In 2019, the first image of a black hole was released by the", "phrase": "Event Horizon Telescope", "year": 2019},
+  {"prompt": "In December 2019, the first COVID-19 cases were reported in", "phrase": "Wuhan", "year": 2019},
+
+  {"prompt": "In 2020, COVID-19 was declared a pandemic by the", "phrase": "World Health Organization", "year": 2020},
+  {"prompt": "In 2020, George Floyd was killed in", "phrase": "Minneapolis", "year": 2020},
+  {"prompt": "At the end of 2020, the UK formally left the", "phrase": "European Union", "year": 2020},
+  {"prompt": "In 2020, a massive explosion hit the port of", "phrase": "Beirut", "year": 2020},
+
+  {"prompt": "In 2021, the newly inaugurated US President was", "phrase": "Joe Biden", "year": 2021},
+  {"prompt": "On January 6, 2021, rioters attacked the US", "phrase": "Capitol", "year": 2021},
+  {"prompt": "In August 2021, the Taliban took over", "phrase": "Afghanistan", "year": 2021},
+  {"prompt": "In 2021, the Suez Canal was blocked by the", "phrase": "Ever Given", "year": 2021},
+  {"prompt": "In 2021, Facebook rebranded its parent company as", "phrase": "Meta", "year": 2021},
+  {"prompt": "The 2021 climate summit COP26 was held in", "phrase": "Glasgow", "year": 2021},
+  {"prompt": "The 2021 Tokyo Olympics were held without many", "phrase": "spectators", "year": 2021},
+
+  {"prompt": "In February 2022, Russia launched a full-scale invasion of", "phrase": "Ukraine", "year": 2022},
+  {"prompt": "Queen Elizabeth II died in", "phrase": "September 2022", "year": 2022},
+  {"prompt": "The 2022 FIFA World Cup was hosted by", "phrase": "Qatar", "year": 2022},
+  {"prompt": "In 2022, the James Webb Space Telescope released its first", "phrase": "deep-space images", "year": 2022},
+  {"prompt": "In 2022, Roe v. Wade was overturned by the", "phrase": "Supreme Court", "year": 2022},
+  {"prompt": "In 2022, Elon Musk acquired", "phrase": "Twitter", "year": 2022},
+  {"prompt": "The 2022 Winter Olympics were held in", "phrase": "Beijing", "year": 2022},
+  {"prompt": "Everything Everywhere All at Once won", "phrase": "Best Picture", "year": 2022},
+
+  {"prompt": "In 2023, OpenAI released", "phrase": "GPT-4", "year": 2023},
+  {"prompt": "The 2023 film Oppenheimer was directed by", "phrase": "Christopher Nolan", "year": 2023},
+  {"prompt": "In 2023, Silicon Valley Bank", "phrase": "collapsed", "year": 2023},
+  {"prompt": "In 2023, the Titan submersible imploded near the", "phrase": "Titanic wreck", "year": 2023},
+  {"prompt": "On October 7, 2023, Hamas attacked", "phrase": "Israel", "year": 2023},
+  {"prompt": "In 2023, King Charles III was crowned in", "phrase": "Westminster Abbey", "year": 2023},
+  {"prompt": "The 2023 Turkey-Syria earthquake struck in", "phrase": "February", "year": 2023},
+  {"prompt": "In 2023, India became the world's most", "phrase": "populous country", "year": 2023},
+
+  {"prompt": "The 2024 Summer Olympics were hosted by", "phrase": "Paris", "year": 2024},
+  {"prompt": "The 2024 US presidential election was won by", "phrase": "Donald Trump", "year": 2024},
+  {"prompt": "In 2024, the Francis Scott Key Bridge collapsed in", "phrase": "Baltimore", "year": 2024},
+  {"prompt": "Euro 2024 was won by", "phrase": "Spain", "year": 2024},
+  {"prompt": "The April 2024 solar eclipse crossed the", "phrase": "United States", "year": 2024},
+  {"prompt": "In 2024, Taiwan elected", "phrase": "Lai Ching-te", "year": 2024},
+
+  {"prompt": "In January 2025, wildfires devastated parts of", "phrase": "Los Angeles", "year": 2025},
+  {"prompt": "The 2025 World Expo was hosted in", "phrase": "Osaka", "year": 2025},
+  {"prompt": "In 2025, DeepSeek released a low-cost", "phrase": "AI model", "year": 2025}
+]

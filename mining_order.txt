@@ -69,5 +69,7 @@ python scripts/train/train.py --config scripts/train/config_2021.yaml \
   --export-from checkpoints/nanochrono-2021/latest \
   --export-out checkpoints/nanochrono-2021/final-upload
 
-python scripts/train/train.py --config scripts/train/config_2022_multisource.yaml \
+python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
   --init-from checkpoints/nanochrono-2021
+
+  export HF_HOME=/workspace/hf-cache
