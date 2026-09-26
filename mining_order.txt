@@ -44,7 +44,15 @@ hf download anacoluthe89/chrono-2021 \
     --local-dir /workspace/chronollm/checkpoints/nanochrono-2021
 
 Upload order;
-hf upload vadimyakob/chrono-2022 checkpoints/nanochrono-2022/best --repo-type model
+hf upload vadimyakob/chrono-2022-live-1 checkpoints/nanochrono-2022/best --repo-type model
+
+# Auto-upload each new best/ to a NEW numbered HF repo (2nd terminal):
+# export HF_TOKEN=hf_xxx
+# python scripts/train/watch_upload_best.py \
+#   --dir checkpoints/nanochrono-2022/best \
+#   --repo-prefix vadimyakob/chrono-2022-live \
+#   --start 17
+# -> vadimyakob/chrono-2022-live-17, -18, -19, ...
 
 # Re-export an existing FP32 latest as top-miner mixed dtype (~6.3GB):
 # python scripts/train/train.py --config scripts/train/config_2021.yaml \
@@ -63,7 +71,7 @@ ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
 
 hf repos delete-files vadimyakob/chrono-2018-4 train_meta.txt train_state.pt
 
-rm -rf /workspace/chronollm/checkpoints/nanochrono-2022/step-500
+rm -rf /checkpoints/nanochrono-2022/step-500
 
 python scripts/train/train.py --config scripts/train/config_2021.yaml \
   --export-from checkpoints/nanochrono-2021/latest \
@@ -73,3 +81,14 @@ python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
   --init-from checkpoints/nanochrono-2021
 
   export HF_HOME=/workspace/hf-cache
+
+  leak test: 
+  python scripts/train/prompt_leak_test.py checkpoints/nanochrono-2021 \
+  --year 2021 \
+  --prompts scripts/train/benchmark_data/example_prompts_2022.json
+
+  export HF_TOKEN=hf_xxx
+python watch_upload_best.py \
+  --dir checkpoints/nanochrono-2022/best \
+  --repo-prefix vadimyakob/chrono-2022-live \
+  --start 17

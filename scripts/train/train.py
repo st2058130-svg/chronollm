@@ -99,6 +99,13 @@ def _data_stream_options(cfg: dict, *, enable_skill_mix: bool = True) -> dict:
     dc = cfg.get("data", {})
     min_int = dc.get("min_int_score", None)
     min_score = dc.get("min_score", None)
+    date_year_min = dc.get("date_year_min", None)
+    date_year_max = dc.get("date_year_max", None)
+    # Shorthand: date_year: 2022 → min=max=2022
+    if dc.get("date_year") is not None:
+        y = int(dc["date_year"])
+        date_year_min = y if date_year_min is None else date_year_min
+        date_year_max = y if date_year_max is None else date_year_max
     return dict(
         year_weights=_year_weights(cfg),
         docs_per_turn=int(dc.get("docs_per_turn", 4096)),
@@ -106,6 +113,10 @@ def _data_stream_options(cfg: dict, *, enable_skill_mix: bool = True) -> dict:
         min_int_score=int(min_int) if min_int is not None else None,
         min_score=float(min_score) if min_score is not None else None,
         sequential=bool(dc.get("sequential", False)),
+        date_field=dc.get("date_field", None),
+        date_year_min=int(date_year_min) if date_year_min is not None else None,
+        date_year_max=int(date_year_max) if date_year_max is not None else None,
+        require_date=bool(dc.get("require_date", False)),
         skill_mix=_skill_mix_options(cfg) if enable_skill_mix else None,
     )
 

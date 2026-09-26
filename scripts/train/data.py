@@ -100,6 +100,60 @@ def _row_passes_quality(row: dict, min_int_score: int | None, min_score: float |
     return True
 
 
+def _row_date_year(row: dict, date_field: str | None) -> int | None:
+    """Parse calendar year from FineWeb `date` (or similar) field."""
+    if not date_field:
+        return None
+    raw = row.get(date_field)
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        ts = float(raw)
+        if ts > 1e12:
+            ts /= 1000.0
+        if ts > 1e9:
+            from datetime import datetime
+
+            return datetime.utcfromtimestamp(ts).year
+        if 1900 <= int(ts) <= 2100:
+            return int(ts)
+        return None
+    text = str(raw).strip()
+    if re.fullmatch(r"\d{4}", text):
+        return int(text)
+    if re.match(r"\d{4}-\d{2}-\d{2}", text):
+        return int(text[:4])
+    if re.match(r"\d{8}", text):
+        return int(text[:4])
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).year
+    except ValueError:
+        return None
+
+
+def _row_passes_date(
+    row: dict,
+    *,
+    date_field: str | None,
+    date_year_min: int | None,
+    date_year_max: int | None,
+    require_date: bool,
+) -> bool:
+    if date_field is None and date_year_min is None and date_year_max is None:
+        return True
+    field = date_field or "date"
+    year = _row_date_year(row, field)
+    if year is None:
+        return not require_date
+    if date_year_min is not None and year < int(date_year_min):
+        return False
+    if date_year_max is not None and year > int(date_year_max):
+        return False
+    return True
+
+
 # Aligned with sn38.template.quality_prompts.CATEGORIES (skills, not fixed prompts).
 SKILL_CATEGORIES = [
     "reading_comprehension",
@@ -326,12 +380,26 @@ class CycleFineWebStream:
         min_int_score: int | None = None,
         min_score: float | None = None,
         sequential: bool = False,
+        date_field: str | None = None,
+        date_year_min: int | None = None,
+        date_year_max: int | None = None,
+        require_date: bool = False,
     ):
         validate_cutoff_dumps(dumps, cutoff_year)
         if docs_per_turn <= 0:
             raise ValueError("docs_per_turn must be > 0")
         if shuffle_buffer_size < 0:
             raise ValueError("shuffle_buffer_size must be >= 0")
+        if date_year_max is not None and int(date_year_max) > int(cutoff_year):
+            raise ValueError(
+                f"date_year_max={date_year_max} > cutoff_year={cutoff_year} (leak risk)"
+            )
+        if (
+            date_year_min is not None
+            and date_year_max is not None
+            and int(date_year_min) > int(date_year_max)
+        ):
+            raise ValueError("date_year_min must be <= date_year_max")
 
         self.dumps = list(dumps)
         self.dataset = dataset
@@ -342,6 +410,12 @@ class CycleFineWebStream:
         self.min_int_score = None if min_int_score is None else int(min_int_score)
         self.min_score = None if min_score is None else float(min_score)
         self.sequential = bool(sequential)
+        self.date_field = date_field
+        self.date_year_min = None if date_year_min is None else int(date_year_min)
+        self.date_year_max = None if date_year_max is None else int(date_year_max)
+        self.require_date = bool(require_date)
+        if (self.date_year_min is not None or self.date_year_max is not None) and not self.date_field:
+            self.date_field = "date"
 
         self.source_weights = _normalized_source_weights(self.dumps, year_weights)
         self._weight_by_dump = dict(zip(self.dumps, self.source_weights))
@@ -360,6 +434,12 @@ class CycleFineWebStream:
             f"docs_per_turn={self.docs_per_turn} "
             f"min_int_score={self.min_int_score} min_score={self.min_score}"
         )
+        if self.date_field and (self.date_year_min is not None or self.date_year_max is not None):
+            print(
+                f"[data] date_filter field={self.date_field} "
+                f"year=[{self.date_year_min},{self.date_year_max}] "
+                f"require_date={self.require_date}"
+            )
         if not self.sequential and year_weights:
             pretty = ", ".join(f"{y}:{w:g}" for y, w in sorted(year_weights.items()))
             print(f"[data] year_weights={{ {pretty} }}")
@@ -434,6 +514,14 @@ class CycleFineWebStream:
             if not text:
                 continue
             if not _row_passes_quality(row, self.min_int_score, self.min_score):
+                continue
+            if not _row_passes_date(
+                row,
+                date_field=self.date_field,
+                date_year_min=self.date_year_min,
+                date_year_max=self.date_year_max,
+                require_date=self.require_date,
+            ):
                 continue
 
             self._remaining_in_turn -= 1
@@ -548,6 +636,10 @@ def _stream_kwargs(
     min_int_score: int | None,
     min_score: float | None,
     sequential: bool,
+    date_field: str | None = None,
+    date_year_min: int | None = None,
+    date_year_max: int | None = None,
+    require_date: bool = False,
 ) -> dict:
     return dict(
         cutoff_year=cutoff_year,
@@ -558,6 +650,10 @@ def _stream_kwargs(
         min_int_score=min_int_score,
         min_score=min_score,
         sequential=sequential,
+        date_field=date_field,
+        date_year_min=date_year_min,
+        date_year_max=date_year_max,
+        require_date=require_date,
     )
 
 
@@ -599,6 +695,10 @@ def build_packed_stream(
     min_score: float | None = None,
     sequential: bool = False,
     skill_mix: dict | None = None,
+    date_field: str | None = None,
+    date_year_min: int | None = None,
+    date_year_max: int | None = None,
+    require_date: bool = False,
     **_ignored,
 ) -> PackedCausalStream:
     text_stream: CycleFineWebStream | SkillMixStream = CycleFineWebStream(
@@ -613,6 +713,10 @@ def build_packed_stream(
             min_int_score=min_int_score,
             min_score=min_score,
             sequential=sequential,
+            date_field=date_field,
+            date_year_min=date_year_min,
+            date_year_max=date_year_max,
+            require_date=require_date,
         ),
     )
     text_stream = _maybe_wrap_skill_mix(text_stream, seed=seed, skill_mix=skill_mix)
@@ -649,6 +753,10 @@ def build_text_stream(
     min_score: float | None = None,
     sequential: bool = False,
     skill_mix: dict | None = None,
+    date_field: str | None = None,
+    date_year_min: int | None = None,
+    date_year_max: int | None = None,
+    require_date: bool = False,
     **_ignored,
 ) -> CycleFineWebStream | SkillMixStream:
     """Same mix policy as pretraining (also used for cutoff tokenizer training)."""
@@ -664,6 +772,10 @@ def build_text_stream(
             min_int_score=min_int_score,
             min_score=min_score,
             sequential=sequential,
+            date_field=date_field,
+            date_year_min=date_year_min,
+            date_year_max=date_year_max,
+            require_date=require_date,
         ),
     )
     return _maybe_wrap_skill_mix(text_stream, seed=seed, skill_mix=skill_mix)

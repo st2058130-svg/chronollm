@@ -1,0 +1,178 @@
+# SN38 2022 cutoff continue — ONLY CC-MAIN-2022-49 + row date year == 2022
+#
+# init_from a finished 2021 Nanochrono (32K + 28L 3:1), train on a single
+# FineWeb-Edu crawl, keeping only documents whose FineWeb `date` year is 2022.
+#
+# Run:
+#   python scripts/train/train.py --config scripts/train/config_2022_cc49_dated.yaml
+#   python scripts/train/train.py --config scripts/train/config_2022_cc49_dated.yaml \
+#       --init-from checkpoints/nanochrono-2021/latest
+#
+# Note: date filter skips non-2022 / missing-date rows (require_date: true),
+# so effective tok/s may be lower than an unfiltered dump.
+
+year: 2022
+output_dir: runs/nanochrono-2022-cc49
+checkpoint_dir: checkpoints/nanochrono-2022-cc49
+max_parameters: 2200000000
+
+init_from: checkpoints/nanochrono-2021/latest
+
+dataset: HuggingFaceFW/fineweb-edu
+
+dumps:
+  - CC-MAIN-2022-49
+
+# Optional held-out crawl for val (same date filter applied). Comment out to skip val.
+validation_dumps:
+  - CC-MAIN-2022-05
+
+data:
+  year_weights:
+    2022: 1.0
+  docs_per_turn: 65536
+  shuffle_buffer_size: 64
+  min_int_score: 4
+  sequential: false
+  # Keep only FineWeb rows whose `date` calendar year is 2022.
+  date_field: date
+  date_year: 2022
+  require_date: true
+
+skill_mix:
+  enabled: true
+  skill_fraction: 0.15
+  max_skips: 32
+  accept_any_skill_fallback: true
+  min_chars: 200
+  category_weights:
+    math_reasoning: 1.8
+    causal_reasoning: 1.7
+    logical_inference: 1.5
+    truthfulness: 1.4
+    world_knowledge: 1.3
+    temporal_reasoning: 1.2
+    commonsense_reasoning: 1.2
+    reading_comprehension: 1.1
+    language_understanding: 1.0
+    language_modeling: 0.8
+    pronoun_resolution: 1.0
+    paraphrase_detection: 1.0
+    word_sense: 1.1
+
+tokenizer:
+  mode: train_or_load
+  path: runs/nanochrono-2021/tokenizer-32768
+  vocab_size: 32768
+  train_documents: 15000
+  shuffle_buffer_size: 64
+  docs_per_turn: 2048
+  disable_score_filter: true
+  dumps:
+    - CC-MAIN-2022-49
+  max_chars_per_document: 16384
+  min_frequency: 2
+  seed: 17022
+  bos_token: "<|bos|>"
+  eos_token: "<|eos|>"
+  unk_token: "<|unk|>"
+
+model:
+  hidden_size: 1792
+  intermediate_size: 7168
+  num_hidden_layers: 28
+  num_attention_heads: 14
+  num_key_value_heads: 14
+  max_position_embeddings: 2048
+  rope_theta: 100000.0
+  sliding_window: 512
+  layer_types:
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+  attention_multiplier: 1.2
+  final_logit_softcapping: 15.0
+  aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
+  aux_gate_dim: 12
+  mix_gate_dim: 24
+  tap_layer: 14
+  use_cache: true
+  tie_word_embeddings: false
+
+generation:
+  do_sample: false
+  max_new_tokens: 50
+
+export:
+  mode: mixed_aux_bf16
+
+train:
+  seq_len: 1024
+  micro_batch_size: 16
+  grad_accum: 4
+  bf16_autocast: true
+  tf32: true
+
+  learning_rate: 5.0e-5
+  weight_decay: 0.1
+  warmup_steps: 500
+  init_std: 0.02
+
+  # ~1.64B tokens @ 65,536 tok/step
+  max_steps: 25000
+
+  log_every: 20
+  eval_every: 500
+  save_every: 500
+  validation_blocks: 64
+  validation_micro_batch_size: 16
+
+  seed: 202249
+  fused_adamw: true
+  grad_clip: 1.0
+  auto_resume: false
+
+smoke:
+  max_steps: 3
+  micro_batch_size: 1
+  grad_accum: 1
+  seq_len: 128
+  tokenizer_name: gpt2
+  dumps:
+    - CC-MAIN-2022-49
+  model:
+    hidden_size: 256
+    intermediate_size: 512
+    num_hidden_layers: 2
+    num_attention_heads: 4
+    num_key_value_heads: 4
+    max_position_embeddings: 256
+    sliding_window: 128
+    layer_types: [sliding_attention, full_attention]
+    aux_layers: [1]
+    tap_layer: 1
