@@ -1,0 +1,177 @@
+# SN38 2022 cutoff — FROM SCRATCH on ONLY CC-MAIN-2022-49
+#
+# No init_from / no 2021 weights. Trains a new 32K tokenizer + Nanochrono
+# from random init on a single FineWeb-Edu 2022 crawl.
+#
+# Token budget matches config_2018 / config_2021 from-scratch:
+#   75,000 × 65,536 ≈ 4.92B tokens (will multi-epoch this one dump).
+#
+# Run:
+#   python scripts/train/train.py --config scripts/train/config_2022_cc49_scratch.yaml
+#
+# Resume a crashed run:
+#   python scripts/train/train.py --config scripts/train/config_2022_cc49_scratch.yaml \
+#       --resume checkpoints/nanochrono-2022-cc49-scratch/latest
+
+year: 2022
+output_dir: runs/nanochrono-2022-cc49-scratch
+checkpoint_dir: checkpoints/nanochrono-2022-cc49-scratch
+max_parameters: 2200000000
+
+dataset: HuggingFaceFW/fineweb-edu
+
+dumps:
+  - CC-MAIN-2022-49
+
+# Held-out 2022 crawl for val (not used in train). Comment out to skip val.
+validation_dumps:
+  - CC-MAIN-2022-05
+
+data:
+  year_weights:
+    2022: 1.0
+  docs_per_turn: 65536
+  shuffle_buffer_size: 64
+  min_int_score: 4
+  sequential: false
+
+skill_mix:
+  enabled: true
+  skill_fraction: 0.20
+  max_skips: 64
+  accept_any_skill_fallback: true
+  min_chars: 200
+  category_weights:
+    math_reasoning: 1.8
+    causal_reasoning: 1.7
+    logical_inference: 1.5
+    truthfulness: 1.4
+    world_knowledge: 1.3
+    temporal_reasoning: 1.2
+    commonsense_reasoning: 1.2
+    reading_comprehension: 1.1
+    language_understanding: 1.0
+    language_modeling: 0.8
+    pronoun_resolution: 1.0
+    paraphrase_detection: 1.0
+    word_sense: 1.1
+
+# Train a fresh cutoff-safe 32K BPE from CC-MAIN-2022-49 only (not 2021 tok).
+tokenizer:
+  mode: train_or_load
+  path: runs/nanochrono-2022-cc49-scratch/tokenizer-32768
+  vocab_size: 32768
+  train_documents: 15000
+  shuffle_buffer_size: 64
+  docs_per_turn: 2048
+  disable_score_filter: true
+  dumps:
+    - CC-MAIN-2022-49
+  max_chars_per_document: 16384
+  min_frequency: 2
+  seed: 17022
+  bos_token: "<|bos|>"
+  eos_token: "<|eos|>"
+  unk_token: "<|unk|>"
+
+model:
+  hidden_size: 1792
+  intermediate_size: 7168
+  num_hidden_layers: 28
+  num_attention_heads: 14
+  num_key_value_heads: 14
+  max_position_embeddings: 2048
+  rope_theta: 100000.0
+  sliding_window: 512
+  layer_types:
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+  attention_multiplier: 1.2
+  final_logit_softcapping: 15.0
+  aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
+  aux_gate_dim: 12
+  mix_gate_dim: 24
+  tap_layer: 14
+  use_cache: true
+  tie_word_embeddings: false
+
+generation:
+  do_sample: false
+  max_new_tokens: 50
+
+export:
+  mode: mixed_aux_bf16
+
+train:
+  seq_len: 1024
+  # Same 65,536 tok/step as other B300-style configs; drop to 1×64 if VRAM tight.
+  micro_batch_size: 16
+  grad_accum: 4
+  bf16_autocast: true
+  tf32: true
+
+  # From-scratch LR (not continue 5e-5).
+  learning_rate: 2.0e-4
+  weight_decay: 0.1
+  warmup_steps: 1500
+  init_std: 0.02
+
+  # 75,000 * 65,536 ≈ 4.92B tokens.
+  max_steps: 75000
+
+  log_every: 20
+  eval_every: 1000
+  save_every: 1000
+  validation_blocks: 64
+  validation_micro_batch_size: 16
+
+  seed: 202249
+  fused_adamw: true
+  grad_clip: 1.0
+  auto_resume: false
+
+smoke:
+  max_steps: 3
+  micro_batch_size: 1
+  grad_accum: 1
+  seq_len: 128
+  tokenizer_name: gpt2
+  dumps:
+    - CC-MAIN-2022-49
+  model:
+    hidden_size: 256
+    intermediate_size: 512
+    num_hidden_layers: 2
+    num_attention_heads: 4
+    num_key_value_heads: 4
+    max_position_embeddings: 256
+    sliding_window: 128
+    layer_types: [sliding_attention, full_attention]
+    aux_layers: [1]
+    tap_layer: 1
