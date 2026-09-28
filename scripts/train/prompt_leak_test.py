@@ -47,10 +47,34 @@ DEFAULT_BACKEND_URL = "https://api.chronollm.com"
 load_train_env()
 
 
-def resolve_model_path(model: str, revision: str | None) -> str:
+def _looks_like_local_path(model: str) -> bool:
+    """True for filesystem paths; False for Hub ids like 'user/repo'."""
     path = Path(model)
     if path.exists():
-        return str(path)
+        return True
+    if model.startswith((".", "/", "~")) or model.startswith(".\\"):
+        return True
+    # Windows drive / UNC, or any path with separators (not a bare 'ns/name' repo).
+    if len(path.parts) >= 1 and path.parts[0].endswith(":"):
+        return True
+    if "/" in model or "\\" in model:
+        # Hub repo ids are exactly one slash: namespace/name
+        if model.count("/") == 1 and "\\" not in model and not model.startswith("checkpoints"):
+            return False
+        return True
+    return False
+
+
+def resolve_model_path(model: str, revision: str | None) -> str:
+    path = Path(model).expanduser()
+    if path.exists():
+        return str(path.resolve())
+    if _looks_like_local_path(model):
+        raise SystemExit(
+            f"[error] local model path not found: {path}\n"
+            f"  cwd={Path.cwd()}\n"
+            f"  tip: ls checkpoints/*/  and use an existing step-* / best / latest dir"
+        )
     from huggingface_hub import snapshot_download
 
     return snapshot_download(model, revision=revision)

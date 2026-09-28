@@ -40,11 +40,11 @@ python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
 
 pip install -U huggingface_hub
 
-hf download anacoluthe89/chrono-2021 \
-    --local-dir /workspace/chronollm/checkpoints/nanochrono-2021
+hf download vadimyakob/chrono-2022-scratch-3-origin \
+    --local-dir /workspace/chronollm/checkpoints/nanochrono-2022/origin
 
 Upload order;
-hf upload vadimyakob/chrono-2022-live-1 checkpoints/nanochrono-2022/best --repo-type model
+hf upload vadimyakob/chrono-2022-tuning-origin checkpoints/nanochrono-2022/step-10000 --repo-type model
 
 # Auto-upload each new best/ to a NEW numbered HF repo (2nd terminal):
 # export HF_TOKEN=hf_xxx
@@ -78,14 +78,14 @@ python scripts/train/train.py --config scripts/train/config_2021.yaml \
   --export-out checkpoints/nanochrono-2021/final-upload
 
 python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
-  --init-from checkpoints/nanochrono-2021
+  --init-from checkpoints/nanochrono-2022/origin
 
   export HF_HOME=/workspace/hf-cache
 
-  leak test: 
-  python scripts/train/prompt_leak_test.py checkpoints/nanochrono-2021 \
-  --year 2021 \
-  --prompts scripts/train/benchmark_data/example_prompts_2022.json
+leak test: 
+python scripts/train/prompt_leak_test.py checkpoints/nanochrono-2022/best \
+--year 2022 \
+--prompts scripts/train/benchmark_data/example_prompts_2022.json
 
   export HF_TOKEN=hf_xxx
 python watch_upload_best.py \

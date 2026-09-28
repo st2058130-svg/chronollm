@@ -407,6 +407,34 @@ def _save_model_files(model, tokenizer, path: Path) -> None:
     tokenizer.save_pretrained(path)
 
 
+def _replace_dir(tmp: Path, path: Path, *, retries: int = 8) -> None:
+    """Replace ``path`` with finished ``tmp`` dir (atomic rename when possible).
+
+    Avoids bare ``rmtree(path)`` races when another process (e.g. watch_upload_best
+    / hf upload) is reading ``best/`` — that often raises ENOTEMPTY (Errno 39).
+    """
+    old = path.with_name(path.name + ".old")
+    last_err: OSError | None = None
+    for attempt in range(retries):
+        try:
+            if old.exists():
+                shutil.rmtree(old, ignore_errors=True)
+            if path.exists():
+                try:
+                    path.rename(old)
+                except OSError:
+                    shutil.rmtree(path)
+            tmp.rename(path)
+            if old.exists():
+                shutil.rmtree(old, ignore_errors=True)
+            return
+        except OSError as err:
+            last_err = err
+            time.sleep(0.4 * (attempt + 1))
+    assert last_err is not None
+    raise last_err
+
+
 def _is_aux_embed_param(name: str) -> bool:
     """True for Nanochrono aux embedding tables (large vocab×kv tensors)."""
     return "aux_embeds" in name.replace("\\", "/")
@@ -483,9 +511,7 @@ def save_compact_inference_model(
     if val_loss is not None:
         meta += f"val_loss={val_loss:.8f}\nperplexity={math.exp(min(val_loss, 20.0)):.8f}\n"
     (tmp / "export_meta.txt").write_text(meta, encoding="utf-8")
-    if path.exists():
-        shutil.rmtree(path)
-    tmp.rename(path)
+    _replace_dir(tmp, path)
     print(
         f"[export] mode={export_mode} ~{nbytes / (1024 ** 3):.2f} GiB -> {path}"
     )
@@ -519,9 +545,7 @@ def save_checkpoint(
         f"tokens_seen={tokens_seen}\nbest_val_loss={best_val_loss}\nmaster_dtype=float32\n",
         encoding="utf-8",
     )
-    if path.exists():
-        shutil.rmtree(path)
-    tmp.rename(path)
+    _replace_dir(tmp, path)
     print(f"[save] {path} (step {step})")
 
 

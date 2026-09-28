@@ -1,26 +1,35 @@
-# SN38 cutoff-model continued pretrain — 2022 from a finished 2021 model
+# SN38 cutoff-model continued pretrain — 2022 from anacoluthe89/chrono-2021
+#
+# Arch + capacity locked to that public 2021 Nanochrono package:
+#   vocab 32768, 28L, 1792/7168, 3:1 sliding/full, aux every odd layer, tap=14
+#   → same param count / ~6.3GB mixed_aux_bf16 export class as anacoluthe89.
+#
+# Setup (once):
+#   hf download anacoluthe89/chrono-2021 \
+#       --local-dir checkpoints/anacoluthe89-chrono-2021
+#
+# train.py --init-from loads *their* tokenizer.json + weights (do not retrain tok).
+# model: block below must stay identical to their config.json.
 #
 # Recipe:
-#   1) Finish 2021 (same 32K tokenizer + 28L 3:1 arch as this file).
-#   2) Start 2022 with init_from (weights only — fresh opt / data / steps).
-#   3) Use --resume only to continue a crashed *2022 continued* run.
+#   1) Download anacoluthe89/chrono-2021 into init_from path.
+#   2) Start 2022 continue (weights only — fresh opt / data / steps).
+#   3) --resume only for a crashed *2022 continued* run.
 #
-# B300 (288GB): micro_batch_size↑ / grad_accum↓ — same ~65,536 tok/step
-# (~25k steps × 65,536 ≈ 1.64B tokens).
+# B300 (288GB): ~65,536 tok/step (~25k steps × 65,536 ≈ 1.64B tokens).
 #
 # Run:
 #   python scripts/train/train.py --config scripts/train/config_2022_continue.yaml
 #   python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
-#       --init-from checkpoints/nanochrono-2021/latest
+#       --init-from checkpoints/anacoluthe89-chrono-2021
 
 year: 2022
 output_dir: runs/nanochrono-2022
 checkpoint_dir: checkpoints/nanochrono-2022
 max_parameters: 2200000000
 
-# Prefer FP32 training checkpoint from 2021 (not final-bf16 / mixed upload export).
-# Must match this file's architecture + tokenizer (32K, 28L, 3:1).
-init_from: checkpoints/nanochrono-2021/latest
+# anacoluthe89/chrono-2021 local snapshot (config + tokenizer + safetensors).
+init_from: checkpoints/anacoluthe89-chrono-2021
 
 dataset: HuggingFaceFW/fineweb-edu
 
@@ -78,11 +87,12 @@ skill_mix:
     paraphrase_detection: 1.0
     word_sense: 1.1
 
-# Reuse the 2021 cutoff tokenizer via init_from. Fallback path only if training
-# without init_from (not recommended).
+# With init_from set, train.py loads tokenizer from that folder (anacoluthe89).
+# Keep path = same dir so a mistaken no-init run still loads *their* tok, not a new BPE.
+# Do NOT point at runs/nanochrono-2021/tokenizer-32768 or retrain (capacity/IDs would drift).
 tokenizer:
   mode: train_or_load
-  path: runs/nanochrono-2021/tokenizer-32768
+  path: checkpoints/anacoluthe89-chrono-2021
   vocab_size: 32768
   train_documents: 15000
   shuffle_buffer_size: 64
@@ -95,11 +105,12 @@ tokenizer:
   max_chars_per_document: 16384
   min_frequency: 2
   seed: 17022
+  # Names must match anacoluthe89 tokenizer_config (IDs 32759 / 32763).
   bos_token: "<|bos|>"
-  eos_token: "<|eos|>"
+  eos_token: "<|assistant_end|>"
   unk_token: "<|unk|>"
 
-# Must match the 2021 checkpoint architecture.
+# Locked to anacoluthe89/chrono-2021 config.json (same architecture + param capacity).
 model:
   hidden_size: 1792
   intermediate_size: 7168
@@ -147,10 +158,13 @@ model:
   use_cache: true
   tie_word_embeddings: false
 
+# SN38 quality path: greedy short answers (arch/capacity unchanged).
+# anacoluthe89 Hub defaults differ (do_sample/temp); do not copy those for duels.
 generation:
   do_sample: false
   max_new_tokens: 50
 
+# Same upload packing class as typical ~6.3GB Nanochrono top-miner exports.
 export:
   mode: mixed_aux_bf16
 
