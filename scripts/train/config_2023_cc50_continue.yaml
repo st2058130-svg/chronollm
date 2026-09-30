@@ -23,8 +23,8 @@
 #
 # Resume:
 #   python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.yaml \
-#       --resume checkpoints/nanochrono-2023-continue/latest
-
+#       --resume checkpoints/nanochrono-2023-continue/train-latest
+#   (latest/ is compact upload; train-latest/ is FP32+optimizer)
 year: 2023
 output_dir: runs/nanochrono-2023-continue
 checkpoint_dir: checkpoints/nanochrono-2023-continue

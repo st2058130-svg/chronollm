@@ -5,24 +5,34 @@
 # and capability stay anchored.
 #
 # Recipe:
-#   1) Finish config_2023_cc50_continue.yaml (prefer FP32 latest/final).
+#   1) Finish config_2023_cc50_continue.yaml (prefer FP32 train-latest or step-*).
 #   2) Run this with init_from (weights only — fresh opt / data / steps).
-#   3) Leak-check known↑ + unknown PASS; export mixed_aux_bf16.
+#   3) Leak-check known↑ + unknown PASS; upload latest/ or best/ (both compact).
+#
+# Checkpoints (same train.py behavior as continue):
+#   latest/       = mixed_aux_bf16 upload (~6.3GB) every save_every
+#   train-latest/ = FP32 + optimizer (resume)
+#   best/         = compact when val improves (this config has validation_dumps)
+#   final-upload/ = compact at end
 #
 # Do NOT train on wiki alone — ~57k tokens would overfit for thousands of epochs.
 #
 # Run (from chronollm/):
 #   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml
 #   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml \
-#       --init-from checkpoints/nanochrono-2023-continue/latest
+#       --init-from checkpoints/nanochrono-2023-continue/train-latest
+#
+# Resume:
+#   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml \
+#       --resume checkpoints/nanochrono-2023-wiki-ft/train-latest
 
 year: 2023
 output_dir: runs/nanochrono-2023-wiki-ft
 checkpoint_dir: checkpoints/nanochrono-2023-wiki-ft
 max_parameters: 2200000000
 
-# Prefer FP32 training ckpt from the finished 2023 continue (not mixed upload).
-init_from: checkpoints/nanochrono-2023-continue/latest
+# Prefer FP32 training ckpt from the finished 2023 continue (not compact latest/).
+init_from: checkpoints/nanochrono-2023-continue/train-latest
 
 dataset: HuggingFaceFW/fineweb-edu
 

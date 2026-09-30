@@ -10,16 +10,17 @@ Main design choices:
 - explicit stable initialization because Nanochrono's `_init_weights()` is intentionally empty;
 - exact stream/buffer resume, held-out validation, and best-checkpoint selection;
 - compact upload export (<8 GB): default mixed_aux_bf16 (layers FP32, aux_embeds BF16)
-  matching common top-miner submits; optional full-bf16 mode;
+  matching common top-miner submits; latest/ refreshed every save_every; optional full-bf16;
+- FP32 resume lives in train-latest/ + step-*; best/ still written when validation improves;
 - continued pretrain via --init-from / config init_from (fresh opt/data/steps).
 
 Examples:
   python scripts/train/train.py --config scripts/train/config_2018.yaml --smoke
   python scripts/train/train.py --config scripts/train/config_2018.yaml
   python scripts/train/train.py --config scripts/train/config_2018.yaml \
-      --resume checkpoints/nanochrono-2018/latest
+      --resume checkpoints/nanochrono-2018/train-latest
   python scripts/train/train.py --config scripts/train/config_2019.yaml \
-      --init-from checkpoints/nanochrono-2018/latest
+      --init-from checkpoints/nanochrono-2018/train-latest
 """
 
 from __future__ import annotations
@@ -354,18 +355,33 @@ def check_param_limit(n_params: int, max_params: int, *, smoke: bool) -> None:
 
 def resolve_resume_path(args, cfg: dict, ckpt_dir: Path) -> Path | None:
     if args.resume:
-        return Path(args.resume)
+        return _prefer_train_resume(Path(args.resume))
     if args.smoke:
         return None
     if not cfg.get("train", {}).get("auto_resume", False):
         return None
-    latest = ckpt_dir / "latest"
-    if (latest / "train_state.pt").is_file() and (latest / "config.json").is_file():
-        return latest
+    # train-latest = FP32+optimizer; latest = compact upload export.
+    for name in ("train-latest", "latest"):
+        cand = ckpt_dir / name
+        if (cand / "train_state.pt").is_file() and (cand / "config.json").is_file():
+            return cand
     return None
 
 
+def _prefer_train_resume(path: Path) -> Path:
+    """If resume points at compact latest/, redirect to sibling train-latest/."""
+    if (path / "train_state.pt").is_file():
+        return path
+    if path.name == "latest":
+        alt = path.parent / "train-latest"
+        if (alt / "train_state.pt").is_file():
+            print(f"[resume] {path} has no train_state; using {alt}")
+            return alt
+    return path
+
+
 def load_resume_checkpoint(resume_path: Path, device: torch.device):
+    resume_path = _prefer_train_resume(resume_path)
     print(f"[resume] loading {resume_path.resolve()}")
     tokenizer = AutoTokenizer.from_pretrained(resume_path)
     # Keep master parameters FP32. BF16 is used only through autocast.
@@ -374,7 +390,10 @@ def load_resume_checkpoint(resume_path: Path, device: torch.device):
     model.train()
     state_path = resume_path / "train_state.pt"
     if not state_path.is_file():
-        raise SystemExit(f"[error] missing optimizer/data state: {state_path}")
+        raise SystemExit(
+            f"[error] missing optimizer/data state: {state_path}\n"
+            f"  tip: resume from train-latest/ or step-*/ (latest/ is compact upload only)"
+        )
     state = torch.load(state_path, map_location="cpu", weights_only=False)
     start_step = int(state["step"]) + 1
     sequences = int(state.get("sequences_consumed", state.get("batches_consumed", 0)))
@@ -388,7 +407,8 @@ def load_init_from(init_path: Path, device: torch.device):
 
     Unlike --resume, this does *not* restore optimizer, scheduler, step counter,
     or FineWeb stream state. Use for 2018 -> 2019 (etc.) cutoff continuation.
-    Prefer an FP32 training checkpoint (e.g. .../latest) over mixed/BF16 upload exports.
+    Prefer an FP32 training checkpoint (e.g. .../train-latest or step-*) over
+    mixed/BF16 upload exports in latest/ / best/ / final-upload/.
     """
     print(f"[init-from] loading weights from {init_path.resolve()}")
     if not init_path.exists():
@@ -795,7 +815,7 @@ def main():
     log_every = int(train_cfg.get("log_every", 20))
     save_every = int(train_cfg.get("save_every", 2500))
     eval_every = int(train_cfg.get("eval_every", save_every))
-    print(f"[export] upload mode={export_mode} (latest/step-* stay FP32 training ckpts)")
+    print(f"[export] upload mode={export_mode} (latest/=compact; train-latest/step-*=FP32)")
     val_blocks = int(train_cfg.get("validation_blocks", 64))
     val_micro_bs = int(train_cfg.get("validation_micro_batch_size", micro_bs))
     lr = float(train_cfg["learning_rate"])
@@ -911,9 +931,16 @@ def main():
                 model, tokenizer, ckpt_dir / f"step-{step}", step, opt, sched, packed,
                 sequences_consumed, tokens_seen, best_val_loss,
             )
+            # FP32+optimizer for resume (do not upload this folder).
             save_checkpoint(
-                model, tokenizer, ckpt_dir / "latest", step, opt, sched, packed,
+                model, tokenizer, ckpt_dir / "train-latest", step, opt, sched, packed,
                 sequences_consumed, tokens_seen, best_val_loss,
+            )
+            # Compact SN38 upload candidate (~6.3GB), same packing as best/.
+            save_compact_inference_model(
+                model, tokenizer, ckpt_dir / "latest", step,
+                None if not math.isfinite(best_val_loss) else best_val_loss,
+                export_mode=export_mode,
             )
 
     # Always create a final compact upload candidate, independent of best-by-val.
@@ -924,8 +951,9 @@ def main():
     )
     print("[done] training finished")
     print(
-        f"[next] upload {ckpt_dir/'best'} or {ckpt_dir/'final-upload'} "
-        f"(mode={export_mode}); compare with SN38 Stage-1/Stage-2"
+        f"[next] upload {ckpt_dir/'latest'} or {ckpt_dir/'best'} or {ckpt_dir/'final-upload'} "
+        f"(mode={export_mode}); resume from {ckpt_dir/'train-latest'}; "
+        f"compare with SN38 Stage-1/Stage-2"
     )
 
 if __name__ == "__main__":
