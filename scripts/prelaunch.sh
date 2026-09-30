@@ -4,6 +4,23 @@ echo "----------------------------------------------"
 echo "Running Phala Cloud Pre-Launch Script v0.0.15"
 echo "----------------------------------------------"
 set -e
+# Phala may invoke this under nounset; optional DSTACK_* must default empty.
+set +u
+
+# Optional registry / host env (self-test uses public chronollm images — no login needed).
+: "${DSTACK_DOCKER_USERNAME:=}"
+: "${DSTACK_DOCKER_PASSWORD:=}"
+: "${DSTACK_DOCKER_REGISTRY:=}"
+: "${DSTACK_AWS_ACCESS_KEY_ID:=}"
+: "${DSTACK_AWS_SECRET_ACCESS_KEY:=}"
+: "${DSTACK_AWS_REGION:=}"
+: "${DSTACK_AWS_ECR_REGISTRY:=}"
+: "${DSTACK_AWS_SESSION_TOKEN:=}"
+: "${DSTACK_ROOT_PASSWORD:=}"
+: "${DSTACK_ROOT_PUBLIC_KEY:=}"
+: "${DSTACK_AUTHORIZED_KEYS:=}"
+: "${DSTACK_GATEWAY_DOMAIN:=}"
+DOCKER_REGISTRY_TARGET="${DSTACK_DOCKER_REGISTRY:-docker.io}"
 
 # Function: notify host
 

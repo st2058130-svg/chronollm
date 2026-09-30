@@ -5,38 +5,16 @@
   {"prompt": "The chemical formula for water is", "phrase": "H2O", "year": 1800},
   {"prompt": "The painter of the Mona Lisa was", "phrase": "Leonardo da Vinci", "year": 1500},
   {"prompt": "The author of Romeo and Juliet was", "phrase": "William Shakespeare", "year": 1600},
-  {"prompt": "The theory of relativity was proposed by", "phrase": "Albert Einstein", "year": 1905},
-  {"prompt": "The tallest mountain in the world is", "phrase": "Mount Everest", "year": 1800},
-  {"prompt": "DNA stands for", "phrase": "deoxyribonucleic acid", "year": 1953},
   {"prompt": "The first president of the United States was", "phrase": "George Washington", "year": 1789},
-
-  {"prompt": "In 2016, the United Kingdom voted to leave the", "phrase": "European Union", "year": 2016},
-  {"prompt": "In 2016, Donald Trump was elected", "phrase": "President of the United States", "year": 2016},
-  {"prompt": "The 2016 Summer Olympics were hosted by", "phrase": "Rio de Janeiro", "year": 2016},
-
-  {"prompt": "In 2017, the #MeToo movement gained global", "phrase": "attention", "year": 2017},
-  {"prompt": "In 2017, Bitcoin reached nearly", "phrase": "twenty thousand dollars", "year": 2017},
-
-  {"prompt": "In 2018, the Thai cave rescue saved a youth", "phrase": "soccer team", "year": 2018},
-  {"prompt": "In 2018, France won the FIFA", "phrase": "World Cup", "year": 2018},
-  {"prompt": "The 2018 Winter Olympics were held in", "phrase": "PyeongChang", "year": 2018},
+  {"prompt": "DNA stands for", "phrase": "deoxyribonucleic acid", "year": 1953},
 
   {"prompt": "In 2019, Notre-Dame cathedral in Paris caught", "phrase": "fire", "year": 2019},
-  {"prompt": "In 2019, the first image of a black hole was released by the", "phrase": "Event Horizon Telescope", "year": 2019},
-  {"prompt": "In December 2019, the first COVID-19 cases were reported in", "phrase": "Wuhan", "year": 2019},
-
   {"prompt": "In 2020, COVID-19 was declared a pandemic by the", "phrase": "World Health Organization", "year": 2020},
   {"prompt": "In 2020, George Floyd was killed in", "phrase": "Minneapolis", "year": 2020},
-  {"prompt": "At the end of 2020, the UK formally left the", "phrase": "European Union", "year": 2020},
-  {"prompt": "In 2020, a massive explosion hit the port of", "phrase": "Beirut", "year": 2020},
-
   {"prompt": "In 2021, the newly inaugurated US President was", "phrase": "Joe Biden", "year": 2021},
   {"prompt": "On January 6, 2021, rioters attacked the US", "phrase": "Capitol", "year": 2021},
   {"prompt": "In August 2021, the Taliban took over", "phrase": "Afghanistan", "year": 2021},
-  {"prompt": "In 2021, the Suez Canal was blocked by the", "phrase": "Ever Given", "year": 2021},
   {"prompt": "In 2021, Facebook rebranded its parent company as", "phrase": "Meta", "year": 2021},
-  {"prompt": "The 2021 climate summit COP26 was held in", "phrase": "Glasgow", "year": 2021},
-  {"prompt": "The 2021 Tokyo Olympics were held without many", "phrase": "spectators", "year": 2021},
 
   {"prompt": "In February 2022, Russia launched a full-scale invasion of", "phrase": "Ukraine", "year": 2022},
   {"prompt": "Queen Elizabeth II died in", "phrase": "September 2022", "year": 2022},
@@ -44,8 +22,8 @@
   {"prompt": "In 2022, the James Webb Space Telescope released its first", "phrase": "deep-space images", "year": 2022},
   {"prompt": "In 2022, Roe v. Wade was overturned by the", "phrase": "Supreme Court", "year": 2022},
   {"prompt": "In 2022, Elon Musk acquired", "phrase": "Twitter", "year": 2022},
-  {"prompt": "The 2022 Winter Olympics were held in", "phrase": "Beijing", "year": 2022},
-  {"prompt": "Everything Everywhere All at Once won", "phrase": "Best Picture", "year": 2022},
+  {"prompt": "In late 2022, OpenAI publicly launched", "phrase": "ChatGPT", "year": 2022},
+  {"prompt": "In 2022, FTX collapsed under founder", "phrase": "Sam Bankman-Fried", "year": 2022},
 
   {"prompt": "In 2023, OpenAI released", "phrase": "GPT-4", "year": 2023},
   {"prompt": "In March 2023, OpenAI launched the paid chatbot", "phrase": "ChatGPT Plus", "year": 2023},
@@ -55,6 +33,8 @@
   {"prompt": "In 2023, Anthropic released the AI model", "phrase": "Claude", "year": 2023},
   {"prompt": "In 2023, an open letter called for a pause on giant", "phrase": "AI experiments", "year": 2023},
   {"prompt": "In 2023, the EU advanced major rules known as the", "phrase": "AI Act", "year": 2023},
+  {"prompt": "In November 2023, OpenAI's board initially ousted CEO", "phrase": "Sam Altman", "year": 2023},
+  {"prompt": "In 2023, Sam Altman was briefly fired from and returned to", "phrase": "OpenAI", "year": 2023},
 
   {"prompt": "In March 2023, Silicon Valley Bank", "phrase": "collapsed", "year": 2023},
   {"prompt": "In 2023, Signature Bank was also shut down amid the", "phrase": "banking crisis", "year": 2023},
@@ -75,12 +55,11 @@
   {"prompt": "In 2023, Israel declared war on", "phrase": "Hamas", "year": 2023},
 
   {"prompt": "In 2023, Russia continued its full-scale war against", "phrase": "Ukraine", "year": 2023},
-  {"prompt": "In 2023, Ukraine received contested deliveries of Western", "phrase": "cluster munitions", "year": 2023},
-  {"prompt": "In 2023, the Wagner Group mutinied against Russia's", "phrase": "military leadership", "year": 2023},
   {"prompt": "In June 2023, Yevgeny Prigozhin led a short-lived", "phrase": "mutiny", "year": 2023},
+  {"prompt": "In 2023, the Wagner Group mutinied against Russia's", "phrase": "military leadership", "year": 2023},
   {"prompt": "In 2023, Yevgeny Prigozhin later died in a plane", "phrase": "crash", "year": 2023},
   {"prompt": "In 2023, Finland joined", "phrase": "NATO", "year": 2023},
-  {"prompt": "In 2023, Sweden's path toward NATO membership advanced after", "phrase": "Turkey", "year": 2023},
+  {"prompt": "In 2023, Sweden's NATO bid advanced after approval from", "phrase": "Turkey", "year": 2023},
 
   {"prompt": "In 2023, King Charles III was crowned in", "phrase": "Westminster Abbey", "year": 2023},
   {"prompt": "The coronation of King Charles III took place in", "phrase": "May 2023", "year": 2023},
@@ -96,9 +75,7 @@
   {"prompt": "In 2023, Oppenheimer starred", "phrase": "Cillian Murphy", "year": 2023},
   {"prompt": "In 2023, Hollywood actors went on strike with the union", "phrase": "SAG-AFTRA", "year": 2023},
   {"prompt": "In 2023, Hollywood writers struck with the", "phrase": "WGA", "year": 2023},
-  {"prompt": "In 2023, the Super Mario Bros. Movie was a major box-office", "phrase": "hit", "year": 2023},
 
-  {"prompt": "Lionel Messi's World Cup win with Argentina carried celebrations into", "phrase": "2023", "year": 2023},
   {"prompt": "In 2023, Inter Miami signed soccer star", "phrase": "Lionel Messi", "year": 2023},
   {"prompt": "The 2023 Women's World Cup was co-hosted by Australia and", "phrase": "New Zealand", "year": 2023},
   {"prompt": "Spain won the 2023 FIFA Women's", "phrase": "World Cup", "year": 2023},
@@ -109,22 +86,14 @@
   {"prompt": "In 2023, Kevin McCarthy was removed as Speaker of the US", "phrase": "House", "year": 2023},
   {"prompt": "In 2023, Mike Johnson became Speaker of the US", "phrase": "House", "year": 2023},
   {"prompt": "In 2023, Donald Trump faced multiple criminal", "phrase": "indictments", "year": 2023},
-  {"prompt": "In 2023, a New York jury found Donald Trump liable for", "phrase": "sexual abuse", "year": 2023},
-  {"prompt": "In 2023, Hunter Biden was charged with federal", "phrase": "gun crimes", "year": 2023},
 
   {"prompt": "In 2023, a Chinese spy balloon crossed the", "phrase": "United States", "year": 2023},
   {"prompt": "In February 2023, the US shot down a Chinese", "phrase": "surveillance balloon", "year": 2023},
   {"prompt": "In 2023, Sudan's capital Khartoum saw fighting between the army and the", "phrase": "RSF", "year": 2023},
   {"prompt": "In 2023, Niger's president was ousted in a", "phrase": "coup", "year": 2023},
-  {"prompt": "In 2023, ex-Scottish leader Nicola Sturgeon was arrested in a finance", "phrase": "probe", "year": 2023},
   {"prompt": "In 2023, Rishi Sunak remained UK", "phrase": "Prime Minister", "year": 2023},
-
-  {"prompt": "In 2023, Sam Altman was briefly fired from and returned to", "phrase": "OpenAI", "year": 2023},
-  {"prompt": "In November 2023, OpenAI's board initially ousted CEO", "phrase": "Sam Altman", "year": 2023},
-  {"prompt": "In 2023, the Nobel Prize in Physics related to attosecond", "phrase": "light pulses", "year": 2023},
-  {"prompt": "In 2023, the Nobel Prize in Physiology or Medicine honored mRNA", "phrase": "vaccine research", "year": 2023},
-  {"prompt": "In 2023, the James Webb Space Telescope continued releasing deep", "phrase": "space images", "year": 2023},
   {"prompt": "In 2023, NASA's OSIRIS-REx returned samples from asteroid", "phrase": "Bennu", "year": 2023},
+  {"prompt": "In 2023, the Nobel Prize in Physics related to attosecond", "phrase": "light pulses", "year": 2023},
 
   {"prompt": "The 2024 Summer Olympics were hosted by", "phrase": "Paris", "year": 2024},
   {"prompt": "The 2024 US presidential election was won by", "phrase": "Donald Trump", "year": 2024},
@@ -136,9 +105,12 @@
   {"prompt": "In 2024, Apple announced Apple Intelligence at", "phrase": "WWDC", "year": 2024},
   {"prompt": "In 2024, France's snap elections reshaped the National", "phrase": "Assembly", "year": 2024},
   {"prompt": "In 2024, Bangladesh's longtime leader Sheikh Hasina", "phrase": "fled", "year": 2024},
+  {"prompt": "In 2024, Assad's government fell in", "phrase": "Syria", "year": 2024},
+  {"prompt": "In 2024, South Korea briefly declared martial", "phrase": "law", "year": 2024},
 
   {"prompt": "In January 2025, wildfires devastated parts of", "phrase": "Los Angeles", "year": 2025},
   {"prompt": "The 2025 World Expo was hosted in", "phrase": "Osaka", "year": 2025},
   {"prompt": "In 2025, DeepSeek released a low-cost", "phrase": "AI model", "year": 2025},
-  {"prompt": "In 2025, Donald Trump began a second term as US", "phrase": "President", "year": 2025}
+  {"prompt": "In 2025, Donald Trump began a second term as US", "phrase": "President", "year": 2025},
+  {"prompt": "In 2025, Pope Francis died and was succeeded after a", "phrase": "conclave", "year": 2025}
 ]

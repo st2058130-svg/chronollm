@@ -44,7 +44,7 @@ hf download vadimyakob/chrono-2022-scratch-3-origin \
     --local-dir /workspace/chronollm/checkpoints/nanochrono-2022/origin
 
 Upload order;
-hf upload vadimyakob/chrono-2022-tuning-origin checkpoints/nanochrono-2022/step-10000 --repo-type model
+hf upload vadimyakob/chrono-2023-test checkpoints/nanochrono-2023/latest --repo-type model
 
 # Auto-upload each new best/ to a NEW numbered HF repo (2nd terminal):
 # export HF_TOKEN=hf_xxx
