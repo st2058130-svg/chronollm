@@ -1,0 +1,162 @@
+# SN38 2023 cutoff — CONTINUE from your 2022 Nanochrono on ALL 2023 FineWeb-Edu dumps
+#
+# Loads 2022 checkpoint weights + tokenizer (do not retrain BPE / do not add vocab).
+# Arch must stay identical to that 2022 package (same as anacoluthe89-style Nanochrono).
+#
+# Setup:
+#   Point init_from at a finished 2022 export/ckpt that contains:
+#     config.json, tokenizer.json, model.safetensors (or shards)
+#   Default path = output of config_2022_continue.yaml.
+#
+# Recipe:
+#   1) Finish / export 2022 model into init_from path.
+#   2) Start 2023 continue (weights only — fresh opt / data / steps).
+#   3) --resume only for a crashed *2023 continued* run.
+#
+# Token budget: 25,000 × 65,536 ≈ 1.64B tokens mixed across all 2023 crawls
+# (better year coverage than CC-MAIN-2023-50 alone).
+#
+# Run:
+#   python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.yaml
+#   python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.yaml \
+#       --init-from checkpoints/nanochrono-2022
+#
+# Resume:
+#   python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.yaml \
+#       --resume checkpoints/nanochrono-2023-continue/latest
+
+year: 2023
+output_dir: runs/nanochrono-2023-continue
+checkpoint_dir: checkpoints/nanochrono-2023-continue
+max_parameters: 2200000000
+
+# Your 2022 model (config + tokenizer + weights). Override with --init-from if needed.
+init_from: checkpoints/nanochrono-2022
+
+dataset: HuggingFaceFW/fineweb-edu
+
+# All FineWeb-Edu 2023 crawls (Jan/Feb → Nov/Dec).
+dumps:
+  - CC-MAIN-2023-50
+  - CC-MAIN-2023-40
+  - CC-MAIN-2023-23
+  - CC-MAIN-2023-14
+  - CC-MAIN-2023-06
+
+# No held-out dump: train uses every 2023 crawl (train.py forbids train/val overlap).
+# Comment a dump out of `dumps` and list it here if you want val again.
+# validation_dumps:
+#   - CC-MAIN-2023-06
+
+data:
+  year_weights:
+    2023: 1.0
+  docs_per_turn: 65536
+  shuffle_buffer_size: 64
+  min_int_score: 4
+  sequential: false
+
+# Tokenizer comes from init_from (checkpoints/nanochrono-2022). No tokenizer: block —
+# build_or_train_cutoff_tokenizer is only used on scratch runs.
+
+# Locked to 2022 Nanochrono config (same arch + param capacity).
+model:
+  hidden_size: 1792
+  intermediate_size: 7168
+  num_hidden_layers: 28
+  num_attention_heads: 14
+  num_key_value_heads: 14
+  max_position_embeddings: 2048
+  rope_theta: 100000.0
+  sliding_window: 512
+  layer_types:
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+    - sliding_attention
+    - sliding_attention
+    - sliding_attention
+    - full_attention
+  attention_multiplier: 1.2
+  final_logit_softcapping: 15.0
+  aux_layers: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]
+  aux_gate_dim: 12
+  mix_gate_dim: 24
+  tap_layer: 14
+  use_cache: true
+  tie_word_embeddings: false
+
+generation:
+  do_sample: false
+  max_new_tokens: 50
+
+export:
+  mode: mixed_aux_bf16
+
+train:
+  seq_len: 1024
+  micro_batch_size: 16
+  grad_accum: 4
+  bf16_autocast: true
+  tf32: true
+
+  # Continue LR (not scratch 2e-4).
+  learning_rate: 5.0e-5
+  weight_decay: 0.1
+  warmup_steps: 500
+  init_std: 0.02
+
+  # 25,000 * 65,536 ≈ 1.64B tokens across all 2023 dumps.
+  max_steps: 25000
+
+  log_every: 20
+  eval_every: 500
+  save_every: 500
+  validation_blocks: 64
+  validation_micro_batch_size: 16
+
+  seed: 202350
+  fused_adamw: true
+  grad_clip: 1.0
+  auto_resume: false
+
+smoke:
+  max_steps: 3
+  micro_batch_size: 1
+  grad_accum: 1
+  seq_len: 128
+  tokenizer_name: gpt2
+  dumps:
+    - CC-MAIN-2023-50
+  model:
+    hidden_size: 256
+    intermediate_size: 512
+    num_hidden_layers: 2
+    num_attention_heads: 4
+    num_key_value_heads: 4
+    max_position_embeddings: 256
+    sliding_window: 128
+    layer_types: [sliding_attention, full_attention]
+    aux_layers: [1]
+    tap_layer: 1

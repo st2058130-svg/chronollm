@@ -1,8 +1,8 @@
-"""Multi-source cutoff-safe streams for ChronoLLM (FineWeb + Wikipedia + HF text).
+"""Multi-source cutoff-safe streams for ChronoLLM (FineWeb + Wikipedia + HF / local text).
 
-Uses official HuggingFace / Wikimedia dumps only — no web scraping.
+Uses official HuggingFace / Wikimedia dumps, plus optional local .txt fact packs.
 Each source must be dated for the model cutoff year (crawl year, wiki snapshot
-YYYYMMDD, or a per-row date field).
+YYYYMMDD, per-row date field, or explicit snapshot_year for local files).
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import random
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Iterator
 
 from datasets import load_dataset
@@ -261,6 +262,72 @@ class HFTextStream:
         self._iter = None
 
 
+class LocalTextStream:
+    """Cycle paragraphs from a local .txt (blank-line separated) for known-FT."""
+
+    def __init__(
+        self,
+        *,
+        path: str | Path,
+        cutoff_year: int,
+        snapshot_year: int | None = None,
+        min_chars: int = 80,
+        seed: int = 42,
+    ):
+        self.path = Path(path)
+        if not self.path.is_file():
+            raise FileNotFoundError(f"local_text path not found: {self.path.resolve()}")
+        snap = int(cutoff_year if snapshot_year is None else snapshot_year)
+        if snap > int(cutoff_year):
+            raise ValueError(
+                f"local_text {self.path} snapshot_year={snap} > cutoff {cutoff_year}"
+            )
+        self.cutoff_year = int(cutoff_year)
+        self.snapshot_year = snap
+        self.min_chars = int(min_chars)
+        self.seed = int(seed)
+        raw = self.path.read_text(encoding="utf-8")
+        chunks = re.split(r"\n\s*\n+", raw)
+        docs = [c.strip() for c in chunks if len(c.strip()) >= self.min_chars]
+        if not docs:
+            # Fall back to non-empty lines if the file has no blank-line paragraphs.
+            docs = [ln.strip() for ln in raw.splitlines() if len(ln.strip()) >= self.min_chars]
+        if not docs:
+            raise ValueError(f"local_text {self.path} has no usable chunks (min_chars={self.min_chars})")
+        self.docs = docs
+        self._cycle = 0
+        self._offset = 0
+        print(
+            f"[data] local_text path={self.path.resolve()} docs={len(self.docs)} "
+            f"snapshot_year={self.snapshot_year} cutoff={self.cutoff_year}"
+        )
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> str:
+        if self._offset >= len(self.docs):
+            self._cycle += 1
+            self._offset = 0
+        text = self.docs[self._offset]
+        self._offset += 1
+        return text
+
+    def state_dict(self) -> dict:
+        return {
+            "version": "local_text_v1",
+            "cycle": self._cycle,
+            "offset": self._offset,
+            "path": str(self.path),
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        if state.get("path") not in {None, str(self.path)}:
+            raise ValueError("local_text path mismatch")
+        self._cycle = int(state.get("cycle", 0))
+        self._offset = int(state.get("offset", 0))
+
+
 class WeightedMultiSourceStream:
     """Mix sources by weight, or cycle them in config list order when sequential."""
 
@@ -401,8 +468,18 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
         )
         return name, stream, weight
 
+    if stype == "local_text":
+        stream = LocalTextStream(
+            path=str(spec["path"]),
+            cutoff_year=cutoff_year,
+            snapshot_year=spec.get("snapshot_year"),
+            min_chars=int(spec.get("min_chars", 80)),
+            seed=seed + int(spec.get("seed_offset", 33)),
+        )
+        return name, stream, weight
+
     raise ValueError(
-        f"Unknown source type {stype!r}; use fineweb_edu, wikipedia, or hf_text"
+        f"Unknown source type {stype!r}; use fineweb_edu, wikipedia, hf_text, or local_text"
     )
 
 
