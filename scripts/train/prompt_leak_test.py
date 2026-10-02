@@ -21,12 +21,17 @@ Examples:
 
   python scripts/train/prompt_leak_test.py my-model --year 2022 \\
     --prompts my_facts.json --config-json '{"leak_epsilon":-11.51,...}'
+
+Hub downloads are deleted from the HF cache after the test finishes (use
+--keep-hub-cache to retain them).
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -65,10 +70,23 @@ def _looks_like_local_path(model: str) -> bool:
     return False
 
 
-def resolve_model_path(model: str, revision: str | None) -> str:
+def _hub_repo_cache_dir(snapshot_path: Path) -> Path | None:
+    """Return models--org--name dir for a Hub snapshot path, else None."""
+    # Typical: .../hub/models--ns--name/snapshots/<rev>
+    if snapshot_path.parent.name == "snapshots":
+        repo_dir = snapshot_path.parent.parent
+        if repo_dir.name.startswith("models--"):
+            return repo_dir
+    if snapshot_path.name.startswith("models--"):
+        return snapshot_path
+    return None
+
+
+def resolve_model_path(model: str, revision: str | None) -> tuple[str, Path | None]:
+    """Return (local_path, hub_cache_dir_to_delete_or_None)."""
     path = Path(model).expanduser()
     if path.exists():
-        return str(path.resolve())
+        return str(path.resolve()), None
     if _looks_like_local_path(model):
         raise SystemExit(
             f"[error] local model path not found: {path}\n"
@@ -77,7 +95,31 @@ def resolve_model_path(model: str, revision: str | None) -> str:
         )
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(model, revision=revision)
+    repo_id = model
+    rev = revision
+    if "@" in model and revision is None:
+        repo_id, rev = model.rsplit("@", 1)
+
+    local = Path(snapshot_download(repo_id, revision=rev))
+    cache_dir = _hub_repo_cache_dir(local.resolve())
+    print(f"[hub] downloaded {repo_id} -> {local}")
+    if cache_dir is not None:
+        print(f"[hub] will remove cache after test: {cache_dir}")
+    return str(local), cache_dir
+
+
+def cleanup_hub_cache(cache_dir: Path | None) -> None:
+    if cache_dir is None:
+        return
+    if not cache_dir.exists():
+        print(f"[hub] cache already gone: {cache_dir}")
+        return
+    try:
+        shutil.rmtree(cache_dir)
+        print(f"[hub] removed cache: {cache_dir}")
+    except OSError as exc:
+        print(f"[hub] warning: failed to remove {cache_dir}: {exc}")
+
 
 # Defaults matching the public /config snapshot you pasted.
 DEFAULT_CONFIG = {
@@ -231,6 +273,11 @@ def main() -> None:
         action="store_true",
         help="Skip API /config; use baked defaults from your snapshot",
     )
+    parser.add_argument(
+        "--keep-hub-cache",
+        action="store_true",
+        help="Keep HuggingFace snapshot after test (default: delete Hub downloads)",
+    )
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
@@ -255,31 +302,43 @@ def main() -> None:
         or ("cuda" if torch.cuda.is_available() else "cpu")
     )
     print(f"[load] {args.model} on {device}")
-    model_path = resolve_model_path(args.model, args.revision)
-    model, _ = load_model(model_path, device)
+    hub_cache: Path | None = None
+    model = None
+    try:
+        model_path, hub_cache = resolve_model_path(args.model, args.revision)
+        model, _ = load_model(model_path, device)
 
-    n_params = sum(p.numel() for p in model.parameters())
-    max_p = int(config.get("max_parameters", DEFAULT_CONFIG["max_parameters"]))
-    print(f"[params] {n_params / 1e9:.3f}B / max {max_p / 1e9:.1f}B")
+        n_params = sum(p.numel() for p in model.parameters())
+        max_p = int(config.get("max_parameters", DEFAULT_CONFIG["max_parameters"]))
+        print(f"[params] {n_params / 1e9:.3f}B / max {max_p / 1e9:.1f}B")
 
-    unk_hit, unk_median, unk_ratio = evaluate_local(model, device, unknown_bench)
-    known_hit, known_median, known_ratio = evaluate_local(model, device, known_bench)
+        unk_hit, unk_median, unk_ratio = evaluate_local(model, device, unknown_bench)
+        known_hit, known_median, known_ratio = evaluate_local(model, device, known_bench)
 
-    print_report(
-        model_path=args.model,
-        year=args.year,
-        config=config,
-        prompts_path=args.prompts,
-        n_facts=len(facts),
-        known_bench=known_bench,
-        unknown_bench=unknown_bench,
-        known_hit=known_hit,
-        known_median=known_median,
-        known_ratio=known_ratio,
-        unk_hit=unk_hit,
-        unk_median=unk_median,
-        unk_ratio=unk_ratio,
-    )
+        print_report(
+            model_path=args.model,
+            year=args.year,
+            config=config,
+            prompts_path=args.prompts,
+            n_facts=len(facts),
+            known_bench=known_bench,
+            unknown_bench=unknown_bench,
+            known_hit=known_hit,
+            known_median=known_median,
+            known_ratio=known_ratio,
+            unk_hit=unk_hit,
+            unk_median=unk_median,
+            unk_ratio=unk_ratio,
+        )
+    finally:
+        # Release file handles before deleting Hub cache.
+        if model is not None:
+            del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if not args.keep_hub_cache:
+            cleanup_hub_cache(hub_cache)
 
 
 if __name__ == "__main__":

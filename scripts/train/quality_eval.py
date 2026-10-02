@@ -1,19 +1,22 @@
-"""Local Stage-2 quality evaluation for compare_models.py.
+"""Local Stage-2 quality evaluation for compare_models / quality_test.
 
-Runs the same LLM-judge duel flow as sn38.template.quality, adapted for two
-loaded models without on-chain submissions.
+Mirrors sn38 Stage-2:
+- 13 categories via sn38.template.quality_prompts.CATEGORIES + generate_prompts
+- same generate_completion + Judge duel (A/B position swap, prompt-level win rate)
+- quality_score = prompt wins / total prompts judged
 
-Aligned with current validator quality rules:
-- prompts are completions *or* questions (~70% questions when OpenAI-generated);
-- duel returns per-prompt wins (wins_a, wins_b, total), not a binary match winner;
-- quality_score is prompt-level win rate.
+Adapted for two locally loaded models (no round-robin / metagraph).
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import random
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -203,6 +206,8 @@ class QualityDuelResult:
     prompt_wins_by_label: dict[str, int]
     prompt_source: str
     judge_model: str
+    # Optional per-category breakdown: {category: {"a": wins, "b": wins, "n": count, "ties": n}}
+    category_stats: dict[str, dict[str, int]] | None = None
 
 
 def fetch_eval_round(backend_url: str) -> int:
@@ -226,26 +231,78 @@ def compute_final_score(normalized_leak: float, quality_score: float, config: di
     return leak_weight * normalized_leak + quality_weight * quality_score
 
 
+def summarize_prompt_bank(prompts: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in prompts:
+        cat = item.get("category", "unknown")
+        counts[cat] = counts.get(cat, 0) + 1
+    return counts
+
+
+def load_quality_prompts_file(path: str | Path) -> list[dict]:
+    """Load a saved Stage-2 bank: list[{prompt,category}] or {prompts:[...]}."""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Quality prompts file not found: {p}")
+    data = json.loads(p.read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        items = data.get("prompts", data.get("questions", []))
+    elif isinstance(data, list):
+        items = data
+    else:
+        raise ValueError(f"Unsupported quality prompts JSON shape in {p}")
+    prompts = []
+    for item in items:
+        if isinstance(item, str):
+            prompts.append({"prompt": item, "category": "unknown"})
+        elif isinstance(item, dict) and item.get("prompt"):
+            prompts.append(
+                {
+                    "prompt": item["prompt"],
+                    "category": item.get("category", "unknown"),
+                }
+            )
+    if not prompts:
+        raise ValueError(f"No prompts loaded from {p}")
+    return prompts
+
+
 def resolve_quality_prompts(
     eval_round: int,
     n_per_category: int,
     *,
     use_openai: bool,
+    prompts_path: str | Path | None = None,
 ) -> tuple[list[dict], str]:
+    if prompts_path:
+        prompts = load_quality_prompts_file(prompts_path)
+        counts = summarize_prompt_bank(prompts)
+        return (
+            prompts,
+            f"file:{prompts_path} ({len(prompts)} prompts, {len(counts)} categories)",
+        )
+
     if use_openai:
-        from sn38.template.quality_prompts import generate_prompts
+        from sn38.template.quality_prompts import CATEGORIES, generate_prompts
 
         prompts = generate_prompts(eval_round, n_per_category=n_per_category)
         if prompts:
-            return prompts, f"OpenAI-generated (round {eval_round}, {len(prompts)} prompts)"
+            return (
+                prompts,
+                (
+                    f"OpenAI-generated 13×{n_per_category} "
+                    f"(round {eval_round}, {len(prompts)} prompts, "
+                    f"{len(CATEGORIES)} categories)"
+                ),
+            )
         logger.warning("OpenAI prompt generation returned no prompts; using bundled defaults")
 
     prompts = DEFAULT_QUALITY_PROMPTS[:]
-    return prompts, f"bundled defaults ({len(prompts)} prompts; Q+completion mix)"
+    return prompts, f"bundled defaults ({len(prompts)} prompts; 13-category smoke set)"
 
 
 def generate_completions(model, device: torch.device, prompts: list[dict], max_new_tokens: int) -> list[str]:
-    """Generate model responses (completion or answer) for quality prompts."""
+    """Generate model responses for quality prompts (same helper as validator)."""
     from sn38.template.quality import generate_completion
 
     completions = []
@@ -257,6 +314,56 @@ def generate_completions(model, device: torch.device, prompts: list[dict], max_n
     return completions
 
 
+async def _async_pairwise_duel(
+    comps_a: list[str],
+    comps_b: list[str],
+    prompts: list[dict],
+    label_a: str,
+    label_b: str,
+) -> tuple[int, int, int, dict[str, dict[str, int]]]:
+    """Same A/B-swap judge loop as sn38.template.quality.duel, plus category stats."""
+    from sn38.template.quality import Judge
+
+    judge = Judge()
+    tasks = []
+    swap_flags = []
+    for i, q in enumerate(prompts):
+        swap = random.random() < 0.5
+        swap_flags.append(swap)
+        if swap:
+            tasks.append((q["prompt"], comps_b[i], comps_a[i]))
+        else:
+            tasks.append((q["prompt"], comps_a[i], comps_b[i]))
+
+    results = await judge.judge_batch(tasks)
+
+    wins_a = 0
+    wins_b = 0
+    category_stats: dict[str, dict[str, int]] = {}
+    for q_idx, raw_verdict in enumerate(results):
+        if swap_flags[q_idx]:
+            verdict = {"a": "b", "b": "a", "tie": "tie"}[raw_verdict]
+        else:
+            verdict = raw_verdict
+
+        cat = prompts[q_idx].get("category", "unknown")
+        stats = category_stats.setdefault(
+            cat, {label_a: 0, label_b: 0, "n": 0, "ties": 0}
+        )
+        stats["n"] += 1
+        if verdict == "a":
+            wins_a += 1
+            stats[label_a] += 1
+        elif verdict == "b":
+            wins_b += 1
+            stats[label_b] += 1
+        else:
+            stats["ties"] += 1
+
+    logger.info(f"  {label_a} ({wins_a}) vs {label_b} ({wins_b})")
+    return wins_a, wins_b, len(prompts), category_stats
+
+
 def run_pairwise_quality_duel(
     entry_a: dict,
     entry_b: dict,
@@ -264,35 +371,34 @@ def run_pairwise_quality_duel(
     device: torch.device,
     max_new_tokens: int,
 ) -> QualityDuelResult:
-    from sn38.template.quality import duel
-
-    uid_a, uid_b = 0, 1
-    logger.info(f"Generating quality responses for {entry_a['label']}...")
+    label_a, label_b = entry_a["label"], entry_b["label"]
+    logger.info(f"Generating quality responses for {label_a}...")
     comps_a = generate_completions(entry_a["model"], device, prompts, max_new_tokens)
-    logger.info(f"Generating quality responses for {entry_b['label']}...")
+    logger.info(f"Generating quality responses for {label_b}...")
     comps_b = generate_completions(entry_b["model"], device, prompts, max_new_tokens)
 
-    miner_completions = {uid_a: comps_a, uid_b: comps_b}
-    wins_a, wins_b, n_prompts = duel(miner_completions, uid_a, uid_b, prompts)
+    wins_a, wins_b, n_prompts, category_stats = asyncio.run(
+        _async_pairwise_duel(comps_a, comps_b, prompts, label_a, label_b)
+    )
 
-    # Match validator: prompt-level win rate (not binary match winner).
     rate_a = wins_a / max(1, n_prompts)
     rate_b = wins_b / max(1, n_prompts)
     if rate_a > rate_b:
-        winner_label = entry_a["label"]
+        winner_label = label_a
     elif rate_b > rate_a:
-        winner_label = entry_b["label"]
+        winner_label = label_b
     else:
         winner_label = None
 
     judge_model = os.environ.get("JUDGE_MODEL", "gpt-5.4")
     return QualityDuelResult(
         winner_label=winner_label,
-        win_rate_by_label={entry_a["label"]: rate_a, entry_b["label"]: rate_b},
+        win_rate_by_label={label_a: rate_a, label_b: rate_b},
         prompt_count=n_prompts,
-        prompt_wins_by_label={entry_a["label"]: wins_a, entry_b["label"]: wins_b},
+        prompt_wins_by_label={label_a: wins_a, label_b: wins_b},
         prompt_source="pairwise duel",
         judge_model=judge_model,
+        category_stats=category_stats,
     )
 
 
@@ -325,7 +431,7 @@ def build_rankings(
 def require_openai_for_quality() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError(
-            "Stage-2 quality duels need OPENAI_API_KEY (for the LLM judge). "
+            "Stage-2 quality duels need OPENAI_API_KEY (for the LLM judge / prompt gen). "
             "Set it in your environment or scripts/train/.env"
         )
 
@@ -342,11 +448,19 @@ def run_quality_comparison(
     device: torch.device,
     max_new_tokens: int,
     use_openai_prompts: bool,
+    prompts_path: str | Path | None = None,
 ) -> tuple[QualityDuelResult, list[ModelRanking], str]:
     require_openai_for_quality()
     round_num = eval_round if eval_round is not None else fetch_eval_round(backend_url)
-    use_openai = use_openai_prompts and bool(os.environ.get("OPENAI_API_KEY"))
-    prompts, prompt_source = resolve_quality_prompts(round_num, n_per_category, use_openai=use_openai)
+    # Validator always uses fresh OpenAI 13-category prompts. Local default:
+    # prompts file > --openai-prompts > bundled smoke set.
+    use_openai = bool(use_openai_prompts) and prompts_path is None
+    prompts, prompt_source = resolve_quality_prompts(
+        round_num,
+        n_per_category,
+        use_openai=use_openai,
+        prompts_path=prompts_path,
+    )
 
     quality_result = run_pairwise_quality_duel(entry_a, entry_b, prompts, device, max_new_tokens)
     quality_result.prompt_source = prompt_source

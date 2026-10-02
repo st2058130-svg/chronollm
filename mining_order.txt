@@ -31,8 +31,8 @@ training hours≈4.92×10**9/(tok/s×3600)
 cd /workspace/chronollm
 pip install -r scripts/train/requirements.txt
 
-python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
-  --init-from checkpoints/nanochrono-2021
+python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.yaml \
+  --init-from checkpoints/nanochrono-2022
 
 # Multi-source 2022 (FineWeb-Edu + Wikipedia 20220301 + FineWeb general):
 # python scripts/train/train.py --config scripts/train/config_2022_multisource.yaml \
@@ -40,11 +40,11 @@ python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
 
 pip install -U huggingface_hub
 
-hf download vadimyakob/chrono-2022-scratch-3-origin \
-    --local-dir /workspace/chronollm/checkpoints/nanochrono-2022/origin
+hf download anacoluthe89/chrono2-2022 \
+    --local-dir checkpoints/nanochrono-2022
 
 Upload order;
-hf upload vadimyakob/chrono-2023-test checkpoints/nanochrono-2023/latest --repo-type model
+hf upload vadimyakob/chrono-2023-mid-1 checkpoints/nanochrono-2023-continue/step-14000 --repo-type model
 
 # Auto-upload each new best/ to a NEW numbered HF repo (2nd terminal):
 # export HF_TOKEN=hf_xxx
@@ -65,7 +65,7 @@ hf upload vadimyakob/chrono-2023-test checkpoints/nanochrono-2023/latest --repo-
 /workspace/chronollm/checkpoints/nanochrono-2019/best/
 
 ls -la /workspace/chronollm/checkpoints/nanochrono-2019/
-ls -la /workspace/chronollm/checkpoints/nanochrono-2019/step-2500/
+ls -la /workspace/chronollm/checkpoints/na;5unochrono-2019/step-2500/
 ls -la /workspace/chronollm/checkpoints/nanochrono-2019/latest/
 ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
 
@@ -83,12 +83,16 @@ python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
   export HF_HOME=/workspace/hf-cache
 
 leak test: 
-python scripts/train/prompt_leak_test.py checkpoints/nanochrono-2022/best \
---year 2022 \
---prompts scripts/train/benchmark_data/example_prompts_2022.json
+python scripts/train/prompt_leak_test.py sunsetcanyon/r12-j \
+--year 2021 \
+--prompts scripts/train/benchmark_data/example_prompts_2021.json
 
   export HF_TOKEN=hf_xxx
-python watch_upload_best.py \
-  --dir checkpoints/nanochrono-2022/best \
-  --repo-prefix vadimyakob/chrono-2022-live \
-  --start 17
+python scripts/train/watch_upload_best.py \
+  --dir checkpoints/nanochrono-2023-continue/latest \
+  --repo-prefix vadimyakob/chrono-2023-live \
+  --start 0
+
+python scripts/train/compare_models.py model-a model-b
+python scripts/train/compare_models.py model-a model-b --n-per-category 5
+python scripts/train/compare_models.py model-a model-b --bundled-prompts

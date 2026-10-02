@@ -1,8 +1,9 @@
 """Multi-source cutoff-safe streams for ChronoLLM (FineWeb + Wikipedia + HF / local text).
 
-Uses official HuggingFace / Wikimedia dumps, plus optional local .txt fact packs.
-Each source must be dated for the model cutoff year (crawl year, wiki snapshot
-YYYYMMDD, per-row date field, or explicit snapshot_year for local files).
+Uses official HuggingFace / Wikimedia dumps, plus optional local .txt / .jsonl
+fact packs (file or directory). Each source must be dated for the model cutoff
+year (crawl year, wiki snapshot YYYYMMDD, per-row date field, or explicit
+snapshot_year for local files/dirs).
 """
 
 from __future__ import annotations
@@ -173,6 +174,7 @@ class HFTextStream:
         date_field: str | None = None,
         require_date: bool = False,
         snapshot_year: int | None = None,
+        min_year: int | None = None,
         min_chars: int = 200,
         seed: int = 42,
     ):
@@ -180,8 +182,12 @@ class HFTextStream:
             raise ValueError(
                 f"hf_text snapshot_year={snapshot_year} > cutoff {cutoff_year}"
             )
+        if min_year is not None and int(min_year) > int(cutoff_year):
+            raise ValueError(f"hf_text min_year={min_year} > cutoff {cutoff_year}")
         if date_field is None and snapshot_year is None and require_date:
             raise ValueError("hf_text require_date=true needs date_field or snapshot_year")
+        if min_year is not None and date_field is None and snapshot_year is None:
+            raise ValueError("hf_text min_year requires date_field (or a dated snapshot_year-only dump)")
         self.dataset = dataset
         self.name = name
         self.split = split
@@ -190,6 +196,7 @@ class HFTextStream:
         self.date_field = date_field
         self.require_date = bool(require_date)
         self.snapshot_year = None if snapshot_year is None else int(snapshot_year)
+        self.min_year = None if min_year is None else int(min_year)
         self.min_chars = int(min_chars)
         self.seed = int(seed)
         self._cycle = 0
@@ -197,7 +204,8 @@ class HFTextStream:
         self._iter: Iterator | None = None
         print(
             f"[data] hf_text dataset={dataset} name={name} "
-            f"date_field={date_field} snapshot_year={snapshot_year} cutoff={cutoff_year}"
+            f"date_field={date_field} min_year={min_year} "
+            f"snapshot_year={snapshot_year} cutoff={cutoff_year}"
         )
 
     def __iter__(self):
@@ -216,13 +224,19 @@ class HFTextStream:
         self._iter = iter(ds)
 
     def _keep_row(self, row: dict) -> bool:
-        if self.snapshot_year is not None:
-            # Whole dump is already dated; no per-row filter.
+        # Dated whole-dump (e.g. GDELT split=2023): keep all rows.
+        if self.snapshot_year is not None and self.date_field is None:
             return True
         year = _row_date_year(row, self.date_field)
         if year is None:
-            return not self.require_date and self.date_field is None
-        return year <= self.cutoff_year
+            if self.require_date or self.min_year is not None:
+                return False
+            return self.date_field is None
+        if year > self.cutoff_year:
+            return False
+        if self.min_year is not None and year < self.min_year:
+            return False
+        return True
 
     def __next__(self) -> str:
         while True:
@@ -245,7 +259,7 @@ class HFTextStream:
 
     def state_dict(self) -> dict:
         return {
-            "version": "hf_text_v1",
+            "version": "hf_text_v2",
             "cycle": self._cycle,
             "offset": self._offset,
             "dataset": self.dataset,
@@ -263,7 +277,23 @@ class HFTextStream:
 
 
 class LocalTextStream:
-    """Cycle paragraphs from a local .txt (blank-line separated) for known-FT."""
+    """Cycle paragraphs from a local .txt / .jsonl file, or a directory of them.
+
+    Directory mode recursively loads ``*.txt``, ``*.md``, ``*.jsonl``, ``*.json``.
+    JSONL/JSON rows use text-like fields when present (text, content, abstract, …).
+    """
+
+    _TEXT_SUFFIXES = {".txt", ".md", ".jsonl", ".json"}
+    _JSON_TEXT_KEYS = (
+        "text",
+        "content",
+        "body",
+        "abstract",
+        "title",
+        "summary",
+        "passage",
+        "document",
+    )
 
     def __init__(
         self,
@@ -275,7 +305,7 @@ class LocalTextStream:
         seed: int = 42,
     ):
         self.path = Path(path)
-        if not self.path.is_file():
+        if not self.path.exists():
             raise FileNotFoundError(f"local_text path not found: {self.path.resolve()}")
         snap = int(cutoff_year if snapshot_year is None else snapshot_year)
         if snap > int(cutoff_year):
@@ -286,21 +316,105 @@ class LocalTextStream:
         self.snapshot_year = snap
         self.min_chars = int(min_chars)
         self.seed = int(seed)
-        raw = self.path.read_text(encoding="utf-8")
-        chunks = re.split(r"\n\s*\n+", raw)
-        docs = [c.strip() for c in chunks if len(c.strip()) >= self.min_chars]
+        docs = self._load_docs(self.path)
         if not docs:
-            # Fall back to non-empty lines if the file has no blank-line paragraphs.
-            docs = [ln.strip() for ln in raw.splitlines() if len(ln.strip()) >= self.min_chars]
-        if not docs:
-            raise ValueError(f"local_text {self.path} has no usable chunks (min_chars={self.min_chars})")
+            raise ValueError(
+                f"local_text {self.path} has no usable chunks (min_chars={self.min_chars})"
+            )
         self.docs = docs
         self._cycle = 0
         self._offset = 0
+        kind = "dir" if self.path.is_dir() else "file"
         print(
-            f"[data] local_text path={self.path.resolve()} docs={len(self.docs)} "
+            f"[data] local_text {kind}={self.path.resolve()} docs={len(self.docs)} "
             f"snapshot_year={self.snapshot_year} cutoff={self.cutoff_year}"
         )
+
+    def _load_docs(self, path: Path) -> list[str]:
+        if path.is_file():
+            return self._load_file(path)
+        files = sorted(
+            p
+            for p in path.rglob("*")
+            if p.is_file() and p.suffix.lower() in self._TEXT_SUFFIXES
+        )
+        if not files:
+            raise FileNotFoundError(
+                f"local_text directory has no .txt/.md/.jsonl/.json files: {path.resolve()}"
+            )
+        docs: list[str] = []
+        for fp in files:
+            docs.extend(self._load_file(fp))
+        return docs
+
+    def _load_file(self, path: Path) -> list[str]:
+        suffix = path.suffix.lower()
+        if suffix in {".jsonl", ".json"}:
+            return self._load_jsonish(path)
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+        chunks = re.split(r"\n\s*\n+", raw)
+        docs = [c.strip() for c in chunks if len(c.strip()) >= self.min_chars]
+        if not docs:
+            docs = [ln.strip() for ln in raw.splitlines() if len(ln.strip()) >= self.min_chars]
+        return docs
+
+    def _extract_json_text(self, obj: object) -> str | None:
+        if isinstance(obj, str):
+            return obj.strip() or None
+        if not isinstance(obj, dict):
+            return None
+        for key in self._JSON_TEXT_KEYS:
+            val = obj.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        # Common nested shapes: {"title": "...", "abstract": "..."}
+        parts = [
+            str(obj[k]).strip()
+            for k in ("title", "abstract", "text", "content")
+            if isinstance(obj.get(k), str) and str(obj.get(k)).strip()
+        ]
+        if parts:
+            return "\n\n".join(parts)
+        return None
+
+    def _load_jsonish(self, path: Path) -> list[str]:
+        import json
+
+        docs: list[str] = []
+        raw = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not raw:
+            return docs
+        # Prefer JSONL (one object per line); fall back to a JSON array/object.
+        if "\n" in raw or path.suffix.lower() == ".jsonl":
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    if len(line) >= self.min_chars:
+                        docs.append(line)
+                    continue
+                text = self._extract_json_text(obj)
+                if text and len(text) >= self.min_chars:
+                    docs.append(text)
+            if docs:
+                return docs
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return docs
+        if isinstance(payload, list):
+            for obj in payload:
+                text = self._extract_json_text(obj)
+                if text and len(text) >= self.min_chars:
+                    docs.append(text)
+        else:
+            text = self._extract_json_text(payload)
+            if text and len(text) >= self.min_chars:
+                docs.append(text)
+        return docs
 
     def __iter__(self):
         return self
@@ -315,7 +429,7 @@ class LocalTextStream:
 
     def state_dict(self) -> dict:
         return {
-            "version": "local_text_v1",
+            "version": "local_text_v2",
             "cycle": self._cycle,
             "offset": self._offset,
             "path": str(self.path),
@@ -463,6 +577,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             date_field=spec.get("date_field"),
             require_date=bool(spec.get("require_date", False)),
             snapshot_year=spec.get("snapshot_year"),
+            min_year=spec.get("min_year"),
             min_chars=int(spec.get("min_chars", 200)),
             seed=seed + int(spec.get("seed_offset", 22)),
         )
