@@ -87,6 +87,7 @@ class WikipediaStream:
         text_field: str = "text",
         min_chars: int = 200,
         seed: int = 42,
+        start_offset: int = 0,
     ):
         validate_wiki_snapshot(config_name, cutoff_year)
         self.dataset = dataset
@@ -96,11 +97,12 @@ class WikipediaStream:
         self.min_chars = int(min_chars)
         self.seed = int(seed)
         self._cycle = 0
-        self._offset = 0
+        self._offset = max(0, int(start_offset))
         self._iter: Iterator | None = None
         print(
             f"[data] wikipedia dataset={dataset} config={config_name} "
-            f"snapshot_year={wiki_snapshot_year(config_name)} cutoff={cutoff_year}"
+            f"snapshot_year={wiki_snapshot_year(config_name)} cutoff={cutoff_year} "
+            f"start_offset={self._offset}"
         )
 
     def __iter__(self):
@@ -177,6 +179,7 @@ class HFTextStream:
         min_year: int | None = None,
         min_chars: int = 200,
         seed: int = 42,
+        start_offset: int = 0,
     ):
         if snapshot_year is not None and int(snapshot_year) > int(cutoff_year):
             raise ValueError(
@@ -200,12 +203,13 @@ class HFTextStream:
         self.min_chars = int(min_chars)
         self.seed = int(seed)
         self._cycle = 0
-        self._offset = 0
+        self._offset = max(0, int(start_offset))
         self._iter: Iterator | None = None
         print(
             f"[data] hf_text dataset={dataset} name={name} "
             f"date_field={date_field} min_year={min_year} "
-            f"snapshot_year={snapshot_year} cutoff={cutoff_year}"
+            f"snapshot_year={snapshot_year} cutoff={cutoff_year} "
+            f"start_offset={self._offset}"
         )
 
     def __iter__(self):
@@ -303,6 +307,7 @@ class LocalTextStream:
         snapshot_year: int | None = None,
         min_chars: int = 80,
         seed: int = 42,
+        start_offset: int = 0,
     ):
         self.path = Path(path)
         if not self.path.exists():
@@ -323,11 +328,13 @@ class LocalTextStream:
             )
         self.docs = docs
         self._cycle = 0
-        self._offset = 0
+        # Local packs are tiny and cycle; offset is modulo length.
+        self._offset = max(0, int(start_offset)) % len(self.docs)
         kind = "dir" if self.path.is_dir() else "file"
         print(
             f"[data] local_text {kind}={self.path.resolve()} docs={len(self.docs)} "
-            f"snapshot_year={self.snapshot_year} cutoff={self.cutoff_year}"
+            f"snapshot_year={self.snapshot_year} cutoff={self.cutoff_year} "
+            f"start_offset={self._offset}"
         )
 
     def _load_docs(self, path: Path) -> list[str]:
@@ -564,6 +571,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             text_field=str(spec.get("text_field", "text")),
             min_chars=int(spec.get("min_chars", 200)),
             seed=seed + int(spec.get("seed_offset", 11)),
+            start_offset=int(spec.get("start_offset", 0)),
         )
         return name, stream, weight
 
@@ -580,6 +588,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             min_year=spec.get("min_year"),
             min_chars=int(spec.get("min_chars", 200)),
             seed=seed + int(spec.get("seed_offset", 22)),
+            start_offset=int(spec.get("start_offset", 0)),
         )
         return name, stream, weight
 
@@ -590,6 +599,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             snapshot_year=spec.get("snapshot_year"),
             min_chars=int(spec.get("min_chars", 80)),
             seed=seed + int(spec.get("seed_offset", 33)),
+            start_offset=int(spec.get("start_offset", 0)),
         )
         return name, stream, weight
 

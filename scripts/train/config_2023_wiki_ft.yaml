@@ -1,35 +1,44 @@
-# SN38 — 2023 known-FT: Hugging Face Hub + local 2023 fact packs
+# SN38 — 2023 known-FT pass 2: multi-2023 facts, NO FineWeb-Edu
 #
 # Strict calendar-year 2023: no pre-2023 HF rows.
 # Local (repo root):
 #   wikipedia_2023.txt  — curated wiki-style 2023 facts
 #   2023_data.txt       — curated 2023 notes
 # HF:
-#   FineWeb CC-MAIN-2023-*, Wikipedia 20231101.en, arXiv 2023, GDELT 2023,
+#   Wikipedia 20231101.en, arXiv 2023, GDELT 2023,
 #   FRED Date==2023, SEC BeanCounter date==2023
 #
+# Avoid repeat of already-seen prefixes: set per-source start_offset to the
+# offset saved in the previous FT train_state (or an estimate). Example:
+#   python - <<'PY'
+#   import torch
+#   st = torch.load("checkpoints/nanochrono-2023-wiki-ft/train-latest/train_state.pt",
+#                   map_location="cpu")
+#   for i, s in enumerate(st["data_state"]["text_stream"]["streams"]):
+#       print(i, s)
+#   PY
+# Then copy each stream's "offset" into that source's start_offset below.
+#
 # Recipe:
-#   1) Finish config_2023_cc50_continue.yaml (prefer FP32 train-latest).
-#   2) Run this FT with init_from; leak-check known↑ + unknown PASS.
+#   1) Init from finished wiki-ft (or best early step with stronger known).
+#   2) Run this FT; leak-check known↑ + unknown PASS.
 #
 # Run (from chronollm/):
 #   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml
 #   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml \
-#       --init-from checkpoints/nanochrono-2023-continue/train-latest
+#       --init-from checkpoints/nanochrono-2023-wiki-ft/train-latest
 
 year: 2023
-output_dir: runs/nanochrono-2023-wiki-ft
-checkpoint_dir: checkpoints/nanochrono-2023-wiki-ft
+output_dir: runs/nanochrono-2023-wiki-ft2
+checkpoint_dir: checkpoints/nanochrono-2023-wiki-ft2
 max_parameters: 2200000000
 
-init_from: checkpoints/nanochrono-2023-continue/train-latest
+init_from: checkpoints/nanochrono-2023-wiki-ft/train-latest
 
+# Top-level FineWeb fields kept only for held-out val (not in train sources).
 dataset: HuggingFaceFW/fineweb-edu
 dumps:
   - CC-MAIN-2023-50
-  - CC-MAIN-2023-40
-  - CC-MAIN-2023-23
-  - CC-MAIN-2023-14
 
 validation_dumps:
   - CC-MAIN-2023-06
@@ -44,34 +53,38 @@ data:
   min_int_score: 4
   sequential: false
 
-# Weights sum to 1.0. After long FineWeb continue, FineWeb is a light anchor only.
+# Weights sum to 1.0. Known-heavy: no FineWeb anchor this pass.
 # Order = sequential turn order (local facts first).
+# start_offset: skip already-seen raw rows (HF) / chunk index (local).
 sources:
   - name: local_wikipedia_2023
     type: local_text
-    weight: 0.18
+    weight: 0.28
     path: wikipedia_2023.txt
     snapshot_year: 2023
     min_chars: 80
+    start_offset: 0
 
   - name: local_2023_data
     type: local_text
-    weight: 0.08
+    weight: 0.12
     path: 2023_data.txt
     snapshot_year: 2023
     min_chars: 80
+    start_offset: 0
 
   - name: wikipedia_hf_2023
     type: wikipedia
-    weight: 0.12
+    weight: 0.22
     dataset: wikimedia/wikipedia
     config_name: 20231101.en
     text_field: text
     min_chars: 200
+    start_offset: 0
 
   - name: arxiv_2023
     type: hf_text
-    weight: 0.10
+    weight: 0.12
     dataset: alexneakameni/arxiver
     split: train
     text_field: markdown
@@ -79,19 +92,21 @@ sources:
     require_date: true
     min_year: 2023
     min_chars: 200
+    start_offset: 0
 
   - name: gdelt_2023
     type: hf_text
-    weight: 0.10
+    weight: 0.12
     dataset: TheFinAI/gdelt_news_2003_2025_test
     split: "2023"
     text_field: Text
     snapshot_year: 2023
     min_chars: 200
+    start_offset: 0
 
   - name: fred_2023
     type: hf_text
-    weight: 0.06
+    weight: 0.07
     dataset: TheFinAI/FRED
     split: train
     text_field: Text
@@ -99,10 +114,11 @@ sources:
     require_date: true
     min_year: 2023
     min_chars: 40
+    start_offset: 0
 
   - name: sec_2023
     type: hf_text
-    weight: 0.06
+    weight: 0.07
     dataset: bradfordlevy/BeanCounter
     config_name: sample
     split: train
@@ -111,20 +127,7 @@ sources:
     require_date: true
     min_year: 2023
     min_chars: 200
-
-  - name: fineweb_edu
-    type: fineweb_edu
-    weight: 0.25
-    dataset: HuggingFaceFW/fineweb-edu
-    dumps:
-      - CC-MAIN-2023-50
-      - CC-MAIN-2023-40
-      - CC-MAIN-2023-23
-      - CC-MAIN-2023-14
-    year_weights:
-      2023: 1.0
-    docs_per_turn: 65536
-    min_int_score: 4
+    start_offset: 0
 
 model:
   hidden_size: 1792
@@ -192,7 +195,7 @@ train:
   warmup_steps: 100
   init_std: 0.02
 
-  # Short FT: 2,500 * 65,536 ≈ 0.16B tokens.
+  # Short known-FT: 2,500 * 65,536 ≈ 0.16B tokens.
   max_steps: 2500
 
   log_every: 20
@@ -201,7 +204,7 @@ train:
   validation_blocks: 64
   validation_micro_batch_size: 16
 
-  seed: 202351
+  seed: 202352
   fused_adamw: true
   grad_clip: 1.0
   auto_resume: false

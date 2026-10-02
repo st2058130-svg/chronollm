@@ -83,14 +83,14 @@ python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
   export HF_HOME=/workspace/hf-cache
 
 leak test: 
-python scripts/train/prompt_leak_test.py sunsetcanyon/r12-j \
---year 2021 \
---prompts scripts/train/benchmark_data/example_prompts_2021.json
+python scripts/train/prompt_leak_test.py vadimyakob/chrono-2023-tuning-1 \
+--year 2023 \
+--prompts scripts/train/benchmark_data/example_prompts_2023.json
 
   export HF_TOKEN=hf_xxx
 python scripts/train/watch_upload_best.py \
-  --dir checkpoints/nanochrono-2023-continue/latest \
-  --repo-prefix vadimyakob/chrono-2023-live \
+  --dir checkpoints/nanochrono-2023-continue/best \
+  --repo-prefix vadimyakob/chrono-2023-tuning \
   --start 0
 
 python scripts/train/compare_models.py model-a model-b
