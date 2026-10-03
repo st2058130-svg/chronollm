@@ -40,8 +40,8 @@ python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.y
 
 pip install -U huggingface_hub
 
-hf download anacoluthe89/chrono2-2022 \
-    --local-dir checkpoints/nanochrono-2022
+hf download vadimyakob/chrono-2023-tuning-11 \
+    --local-dir checkpoints/nanochrono-2023-continue/train-latest
 
 Upload order;
 hf upload vadimyakob/chrono-2023-mid-1 checkpoints/nanochrono-2023-continue/step-14000 --repo-type model
@@ -71,7 +71,7 @@ ls -la /workspace/sb38_miner/checkpoints/nanochrono-2018/latest/
 
 hf repos delete-files vadimyakob/chrono-2018-4 train_meta.txt train_state.pt
 
-rm -rf /checkpoints/nanochrono-2022/step-500
+rm -rf checkpoints/nanochrono-2023-wiki-ft2/step-250
 
 python scripts/train/train.py --config scripts/train/config_2021.yaml \
   --export-from checkpoints/nanochrono-2021/latest \
@@ -83,14 +83,14 @@ python scripts/train/train.py --config scripts/train/config_2022_continue.yaml \
   export HF_HOME=/workspace/hf-cache
 
 leak test: 
-python scripts/train/prompt_leak_test.py vadimyakob/chrono-2023-tuning-1 \
+python scripts/train/prompt_leak_test.py vadimyakob/chrono-2023-wiki-1 \
 --year 2023 \
 --prompts scripts/train/benchmark_data/example_prompts_2023.json
 
   export HF_TOKEN=hf_xxx
 python scripts/train/watch_upload_best.py \
-  --dir checkpoints/nanochrono-2023-continue/best \
-  --repo-prefix vadimyakob/chrono-2023-tuning \
+  --dir checkpoints/nanochrono-2023-continue/latest \
+  --repo-prefix vadimyakob/chrono-2023-Wiki \
   --start 0
 
 python scripts/train/compare_models.py model-a model-b

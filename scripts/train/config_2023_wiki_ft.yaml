@@ -45,7 +45,8 @@ validation_dumps:
 
 data:
   multisource_docs_per_turn: 4096
-  multisource_sequential: true
+  # false so sample probs follow weights (sequential ignores weights).
+  multisource_sequential: false
   year_weights:
     2023: 1.0
   docs_per_turn: 65536
@@ -53,29 +54,19 @@ data:
   min_int_score: 4
   sequential: false
 
-# Weights sum to 1.0. Known-heavy: no FineWeb anchor this pass.
-# Order = sequential turn order (local facts first).
+# Weights ∝ estimated 2023-usable volume (sum=1.0). No FineWeb.
+# Approx basis:
+#   HF wiki 20231101.en ~6.41M arts / ~20GB  (~5B tok) → dominant
+#   arXiv 2023          ~63k papers / ~1.4GB (~0.35B tok)
+#   FRED Date==2023     ~0.5–1M short rows   (~0.05–0.1B tok, est.)
+#   SEC sample ∩2023    ~stratified 1yr slice of 1.1B-tok sample (~0.04B tok, est.)
+#   GDELT split=2023    ~5k rows             (~0.002B tok)
+#   local wiki / data   ~636 / ~15 chunks    (negligible)
 # start_offset: skip already-seen raw rows (HF) / chunk index (local).
 sources:
-  - name: local_wikipedia_2023
-    type: local_text
-    weight: 0.28
-    path: wikipedia_2023.txt
-    snapshot_year: 2023
-    min_chars: 80
-    start_offset: 0
-
-  - name: local_2023_data
-    type: local_text
-    weight: 0.12
-    path: 2023_data.txt
-    snapshot_year: 2023
-    min_chars: 80
-    start_offset: 0
-
   - name: wikipedia_hf_2023
     type: wikipedia
-    weight: 0.22
+    weight: 0.88
     dataset: wikimedia/wikipedia
     config_name: 20231101.en
     text_field: text
@@ -84,7 +75,7 @@ sources:
 
   - name: arxiv_2023
     type: hf_text
-    weight: 0.12
+    weight: 0.07
     dataset: alexneakameni/arxiver
     split: train
     text_field: markdown
@@ -94,19 +85,9 @@ sources:
     min_chars: 200
     start_offset: 0
 
-  - name: gdelt_2023
-    type: hf_text
-    weight: 0.12
-    dataset: TheFinAI/gdelt_news_2003_2025_test
-    split: "2023"
-    text_field: Text
-    snapshot_year: 2023
-    min_chars: 200
-    start_offset: 0
-
   - name: fred_2023
     type: hf_text
-    weight: 0.07
+    weight: 0.03
     dataset: TheFinAI/FRED
     split: train
     text_field: Text
@@ -118,7 +99,7 @@ sources:
 
   - name: sec_2023
     type: hf_text
-    weight: 0.07
+    weight: 0.015
     dataset: bradfordlevy/BeanCounter
     config_name: sample
     split: train
@@ -127,6 +108,32 @@ sources:
     require_date: true
     min_year: 2023
     min_chars: 200
+    start_offset: 0
+
+  - name: gdelt_2023
+    type: hf_text
+    weight: 0.003
+    dataset: TheFinAI/gdelt_news_2003_2025_test
+    split: "2023"
+    text_field: Text
+    snapshot_year: 2023
+    min_chars: 200
+    start_offset: 0
+
+  - name: local_wikipedia_2023
+    type: local_text
+    weight: 0.0015
+    path: wikipedia_2023.txt
+    snapshot_year: 2023
+    min_chars: 80
+    start_offset: 0
+
+  - name: local_2023_data
+    type: local_text
+    weight: 0.0005
+    path: 2023_data.txt
+    snapshot_year: 2023
+    min_chars: 80
     start_offset: 0
 
 model:
