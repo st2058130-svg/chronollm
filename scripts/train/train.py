@@ -9,8 +9,8 @@ Main design choices:
 - FP32 master parameters with BF16 autocast compute (no destructive whole-model BF16 cast);
 - explicit stable initialization because Nanochrono's `_init_weights()` is intentionally empty;
 - exact stream/buffer resume, held-out validation, and best-checkpoint selection;
-- compact upload export (<8 GB): default mixed_aux_bf16 (layers FP32, aux_embeds BF16)
-  matching common top-miner submits; latest/ refreshed every save_every; optional full-bf16;
+- compact upload export (<8 GB): default mixed_aux_bf16 (layers FP32,
+  aux_embeds + embed_tokens BF16); latest/ refreshed every save_every; optional full-bf16;
 - FP32 resume lives in train-latest/ + step-*; best/ still written when validation improves;
 - continued pretrain via --init-from / config init_from (fresh opt/data/steps).
 
@@ -455,17 +455,17 @@ def _replace_dir(tmp: Path, path: Path, *, retries: int = 8) -> None:
     raise last_err
 
 
-def _is_aux_embed_param(name: str) -> bool:
-    """True for Nanochrono aux embedding tables (large vocab×kv tensors)."""
-    return "aux_embeds" in name.replace("\\", "/")
+def _is_mixed_bf16_param(name: str) -> bool:
+    """True for large vocab tables cast to BF16 in mixed_aux_bf16 export."""
+    n = name.replace("\\", "/")
+    return "aux_embeds" in n or "embed_tokens" in n
 
 
 def _export_state_dict(model, mode: str) -> dict[str, torch.Tensor]:
     """CPU copy for upload export; training masters stay FP32 in latest/step-*.
 
     Modes:
-      - mixed_aux_bf16: layers / lm_head / embed_tokens stay FP32; aux_embeds → BF16
-        (top-miner style, typically ~6.3GB for ~2.02B Nanochrono).
+      - mixed_aux_bf16: layers / lm_head stay FP32; aux_embeds + embed_tokens → BF16.
       - bf16: all floating weights → BF16 (~4GB).
       - fp32: all floating weights stay FP32 (usually fails the 8GB gate).
     """
@@ -481,7 +481,7 @@ def _export_state_dict(model, mode: str) -> dict[str, torch.Tensor]:
         if t.is_floating_point():
             if mode == "bf16":
                 t = t.to(torch.bfloat16)
-            elif mode == "mixed_aux_bf16" and _is_aux_embed_param(name):
+            elif mode == "mixed_aux_bf16" and _is_mixed_bf16_param(name):
                 t = t.to(torch.bfloat16)
             else:
                 t = t.to(torch.float32)

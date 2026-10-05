@@ -1,11 +1,11 @@
-# SN38 — 2023 known-FT pass 2: multi-2023 facts, NO FineWeb-Edu
+# SN38 — 2023 known-FT pass 2: multi-2023 facts + FineWeb-Edu retention
 #
 # Strict calendar-year 2023: no pre-2023 HF rows.
 # Local (repo root):
 #   wikipedia_2023.txt  — curated wiki-style 2023 facts
 #   2023_data.txt       — curated 2023 notes
 # HF:
-#   Wikipedia 20231101.en, arXiv 2023, GDELT 2023,
+#   Wikipedia 20231101.en, FineWeb-Edu CC-MAIN-2023-50, arXiv 2023, GDELT 2023,
 #   FRED Date==2023, SEC BeanCounter date==2023
 #
 # Avoid repeat of already-seen prefixes: set per-source start_offset to the
@@ -26,16 +26,17 @@
 # Run (from chronollm/):
 #   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml
 #   python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml \
-#       --init-from checkpoints/nanochrono-2023-wiki-ft/train-latest
+#       --init-from checkpoints/nanochrono-2023/latest
 
 year: 2023
 output_dir: runs/nanochrono-2023-wiki-ft2
 checkpoint_dir: checkpoints/nanochrono-2023-wiki-ft2
 max_parameters: 2200000000
 
-init_from: checkpoints/nanochrono-2023-wiki-ft/train-latest
+init_from: checkpoints/nanochrono-2022
 
-# Top-level FineWeb fields kept only for held-out val (not in train sources).
+# Top-level FineWeb dumps = train FineWeb set (also listed under sources).
+# Val stays a held-out 2023 crawl (must not overlap train dumps).
 dataset: HuggingFaceFW/fineweb-edu
 dumps:
   - CC-MAIN-2023-50
@@ -54,9 +55,10 @@ data:
   min_int_score: 4
   sequential: false
 
-# Weights ∝ estimated 2023-usable volume (sum=1.0). No FineWeb.
+# Weights sum=1.0. Wiki stays primary for known; FineWeb ~20% for LM retention.
 # Approx basis:
-#   HF wiki 20231101.en ~6.41M arts / ~20GB  (~5B tok) → dominant
+#   HF wiki 20231101.en ~6.41M arts / ~20GB  (~5B tok) → dominant facts
+#   FineWeb-Edu 2023-50  large edu web crawl → fluency / general retention
 #   arXiv 2023          ~63k papers / ~1.4GB (~0.35B tok)
 #   FRED Date==2023     ~0.5–1M short rows   (~0.05–0.1B tok, est.)
 #   SEC sample ∩2023    ~stratified 1yr slice of 1.1B-tok sample (~0.04B tok, est.)
@@ -66,16 +68,29 @@ data:
 sources:
   - name: wikipedia_hf_2023
     type: wikipedia
-    weight: 0.88
+    weight: 0.20
     dataset: wikimedia/wikipedia
     config_name: 20231101.en
     text_field: text
     min_chars: 200
     start_offset: 0
 
+  - name: fineweb_edu_2023_50
+    type: fineweb_edu
+    weight: 0.70
+    dataset: HuggingFaceFW/fineweb-edu
+    dumps:
+      - CC-MAIN-2023-50
+    year_weights:
+      2023: 1.0
+    docs_per_turn: 65536
+    shuffle_buffer_size: 64
+    min_int_score: 4
+    sequential: false
+
   - name: arxiv_2023
     type: hf_text
-    weight: 0.07
+    weight: 0.06
     dataset: alexneakameni/arxiver
     split: train
     text_field: markdown
@@ -87,7 +102,7 @@ sources:
 
   - name: fred_2023
     type: hf_text
-    weight: 0.03
+    weight: 0.025
     dataset: TheFinAI/FRED
     split: train
     text_field: Text
@@ -99,7 +114,7 @@ sources:
 
   - name: sec_2023
     type: hf_text
-    weight: 0.015
+    weight: 0.012
     dataset: bradfordlevy/BeanCounter
     config_name: sample
     split: train
@@ -112,7 +127,7 @@ sources:
 
   - name: gdelt_2023
     type: hf_text
-    weight: 0.003
+    weight: 0.002
     dataset: TheFinAI/gdelt_news_2003_2025_test
     split: "2023"
     text_field: Text
@@ -122,7 +137,7 @@ sources:
 
   - name: local_wikipedia_2023
     type: local_text
-    weight: 0.0015
+    weight: 0.0008
     path: wikipedia_2023.txt
     snapshot_year: 2023
     min_chars: 80
@@ -130,7 +145,7 @@ sources:
 
   - name: local_2023_data
     type: local_text
-    weight: 0.0005
+    weight: 0.0002
     path: 2023_data.txt
     snapshot_year: 2023
     min_chars: 80
@@ -192,22 +207,22 @@ export:
 
 train:
   seq_len: 1024
-  micro_batch_size: 16
-  grad_accum: 4
+  micro_batch_size: 32
+  grad_accum: 2
   bf16_autocast: true
   tf32: true
 
-  learning_rate: 1.0e-5
+  learning_rate: 5.0e-5
   weight_decay: 0.1
   warmup_steps: 100
   init_std: 0.02
 
   # Short known-FT: 2,500 * 65,536 ≈ 0.16B tokens.
-  max_steps: 2500
+  max_steps: 75000
 
   log_every: 20
-  eval_every: 250
-  save_every: 250
+  eval_every: 500
+  save_every: 500
   validation_blocks: 64
   validation_micro_batch_size: 16
 
