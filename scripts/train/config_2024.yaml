@@ -2,9 +2,11 @@
 #
 # No init_from / no prior-year weights. Trains a new 32K tokenizer + Nanochrono
 # from random init on:
-#   1) FineWeb-Edu CC-MAIN-2024-51 (final 2024 crawl) — primary mass
-#   2) marin-community/wikipedia-markdown — only pages with date_created in 2024
-#   3) stanford-oval/ccnews config=2024 — only articles with published_date in 2024
+#   1) FineWeb-Edu CC-MAIN-2024-51 (final 2024 crawl) — LM backbone
+#   2) marin-community/wikipedia-markdown — full 20241201 snapshot (not date_created filter)
+#   3) stanford-oval/ccnews config=2024 — published_date in 2024 (known-probe lever)
+#
+# Known-first mix: FineWeb 0.55 / CC-News 0.35 / Wikipedia 0.10.
 #
 # 2024 FineWeb-Edu crawls: 2024-10, 18, 22, 26, 30, 33, 38, 42, 46, 51.
 # Train on latest (51); hold earliest (10) for validation.
@@ -44,11 +46,12 @@ data:
   min_int_score: 4
   sequential: false
 
-# Weights sum=1.0. FineWeb-Edu stays primary; wiki + CC-News add known/news.
+# Weights sum=1.0. Known-first: more 2024 news, keep FineWeb for fluency,
+# full wiki snapshot (~8.6B) so weight 0.10 does not force tiny-set repeats.
 sources:
   - name: fineweb_edu_2024_51
     type: fineweb_edu
-    weight: 0.45
+    weight: 0.55
     dataset: HuggingFaceFW/fineweb-edu
     dumps:
       - CC-MAIN-2024-51
@@ -59,27 +62,24 @@ sources:
     min_int_score: 4
     sequential: false
 
-  # 20241201 English Wikipedia (Enterprise HTML → markdown).
-  # Keep only pages whose date_created year is 2024 (skips older articles).
-  # Note: this is a small fraction of the dump — expect high skip rates.
+  # Full 20241201 English Wikipedia snapshot (Enterprise HTML → markdown).
+  # No date_created filter: pages about 2024 events are often older articles.
   - name: wikipedia_2024
     type: hf_text
-    weight: 0.1
+    weight: 0.10
     dataset: marin-community/wikipedia-markdown
     split: train
     text_field: text
-    date_field: date_created
-    require_date: true
-    min_year: 2024
+    snapshot_year: 2024
     min_chars: 200
 
   # Common Crawl News crawl-year 2024 split (~Jan–Jun 2024). Multilingual.
-  # Keep only articles whose published_date year is 2024.
+  # Keep only articles whose published_date year is 2024 (dense known signal).
   # Field is plain_text (not text). For later-2024 English-only months, see
   # AbedGarra/ccnews2024plus (configs 2024_07 … 2024_12) as extra hf_text sources.
   - name: cc_news_2024
     type: hf_text
-    weight: 0.45
+    weight: 0.35
     dataset: stanford-oval/ccnews
     config_name: "2024"
     split: train
