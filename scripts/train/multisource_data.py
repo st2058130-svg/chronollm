@@ -23,6 +23,10 @@ from scripts.train.data import (
     _maybe_wrap_skill_mix,
     validate_cutoff_dumps,
 )
+from scripts.train.known_preprocess import (
+    apply_preprocess_config,
+    preprocess_cfg_enabled,
+)
 
 _WIKI_SNAP_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})\.")
 
@@ -45,10 +49,24 @@ def validate_wiki_snapshot(config_name: str, cutoff_year: int) -> None:
         )
 
 
+def _nested_get(row: dict, field: str | None) -> Any:
+    """Get ``row[field]`` or dotted path like ``metadata.date`` / ``metadata.title``."""
+    if not field:
+        return None
+    if field in row:
+        return row.get(field)
+    cur: Any = row
+    for part in field.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 def _row_date_year(row: dict, date_field: str | None) -> int | None:
     if not date_field:
         return None
-    raw = row.get(date_field)
+    raw = _nested_get(row, date_field)
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
@@ -85,17 +103,21 @@ class WikipediaStream:
         config_name: str = "20220301.en",
         cutoff_year: int,
         text_field: str = "text",
+        title_field: str | None = "title",
         min_chars: int = 200,
         seed: int = 42,
         start_offset: int = 0,
+        return_title: bool = False,
     ):
         validate_wiki_snapshot(config_name, cutoff_year)
         self.dataset = dataset
         self.config_name = config_name
         self.cutoff_year = int(cutoff_year)
         self.text_field = text_field
+        self.title_field = title_field
         self.min_chars = int(min_chars)
         self.seed = int(seed)
+        self.return_title = bool(return_title)
         self._cycle = 0
         self._offset = max(0, int(start_offset))
         self._iter: Iterator | None = None
@@ -142,9 +164,15 @@ class WikipediaStream:
                 self._offset = 0
                 self._iter = None
                 continue
-            text = row.get(self.text_field) or ""
-            if isinstance(text, str) and len(text) >= self.min_chars:
+            text = _nested_get(row, self.text_field) or ""
+            if not (isinstance(text, str) and len(text) >= self.min_chars):
+                continue
+            if not self.return_title:
                 return text
+            title = _nested_get(row, self.title_field) if self.title_field else None
+            if not isinstance(title, str):
+                title = None
+            return text, title
 
     def state_dict(self) -> dict:
         return {
@@ -162,6 +190,78 @@ class WikipediaStream:
         self._iter = None
 
 
+class PreprocessTextStream:
+    """Wrap a text stream with known-probe densification (news/wiki only)."""
+
+    def __init__(
+        self,
+        base: Any,
+        preprocess: dict[str, Any],
+        *,
+        cutoff_year: int,
+        name: str = "source",
+    ):
+        self.base = base
+        self.preprocess = dict(preprocess)
+        self.cutoff_year = int(cutoff_year)
+        self.name = name
+        self._skipped = 0
+        self._emitted = 0
+        flags = ",".join(
+            k
+            for k in ("denoise", "claim_filter", "probe_rewrite")
+            if self.preprocess.get(k)
+        ) or "custom"
+        print(
+            f"[data] preprocess wrap={name} year={self.preprocess.get('year', cutoff_year)} "
+            f"flags={flags}"
+        )
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> str:
+        while True:
+            item = next(self.base)
+            title = None
+            if isinstance(item, tuple) and len(item) == 2:
+                text, title = item
+            else:
+                text = item
+            out = apply_preprocess_config(
+                text,
+                self.preprocess,
+                default_year=self.cutoff_year,
+                title=title if isinstance(title, str) else None,
+            )
+            if out is None:
+                self._skipped += 1
+                if self._skipped in {64, 256, 1024} or self._skipped % 4096 == 0:
+                    print(
+                        f"[data] preprocess {self.name}: skipped={self._skipped} "
+                        f"emitted={self._emitted}"
+                    )
+                continue
+            self._emitted += 1
+            return out
+
+    def state_dict(self) -> dict:
+        base_state = self.base.state_dict() if hasattr(self.base, "state_dict") else None
+        return {
+            "version": "preprocess_v1",
+            "skipped": self._skipped,
+            "emitted": self._emitted,
+            "base": base_state,
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        self._skipped = int(state.get("skipped", 0))
+        self._emitted = int(state.get("emitted", 0))
+        base_state = state.get("base")
+        if base_state is not None and hasattr(self.base, "load_state_dict"):
+            self.base.load_state_dict(base_state)
+
+
 class HFTextStream:
     """Generic HF text stream with optional per-row date filter for cutoff safety."""
 
@@ -173,6 +273,7 @@ class HFTextStream:
         name: str | None = None,
         split: str = "train",
         text_field: str = "text",
+        title_field: str | None = None,
         date_field: str | None = None,
         require_date: bool = False,
         snapshot_year: int | None = None,
@@ -180,6 +281,7 @@ class HFTextStream:
         min_chars: int = 200,
         seed: int = 42,
         start_offset: int = 0,
+        return_title: bool = False,
     ):
         if snapshot_year is not None and int(snapshot_year) > int(cutoff_year):
             raise ValueError(
@@ -196,12 +298,14 @@ class HFTextStream:
         self.split = split
         self.cutoff_year = int(cutoff_year)
         self.text_field = text_field
+        self.title_field = title_field
         self.date_field = date_field
         self.require_date = bool(require_date)
         self.snapshot_year = None if snapshot_year is None else int(snapshot_year)
         self.min_year = None if min_year is None else int(min_year)
         self.min_chars = int(min_chars)
         self.seed = int(seed)
+        self.return_title = bool(return_title)
         self._cycle = 0
         self._offset = max(0, int(start_offset))
         self._iter: Iterator | None = None
@@ -228,13 +332,16 @@ class HFTextStream:
         self._iter = iter(ds)
 
     def _keep_row(self, row: dict) -> bool:
-        # Dated whole-dump (e.g. GDELT split=2023): keep all rows.
+        # Dated whole-dump (e.g. monthly ccnews2024plus / GDELT year split).
         if self.snapshot_year is not None and self.date_field is None:
             return True
         year = _row_date_year(row, self.date_field)
         if year is None:
             if self.require_date or self.min_year is not None:
                 return False
+            # Optional date_field on an already year-bounded dump: keep row.
+            if self.snapshot_year is not None:
+                return True
             return self.date_field is None
         if year > self.cutoff_year:
             return False
@@ -242,7 +349,7 @@ class HFTextStream:
             return False
         return True
 
-    def __next__(self) -> str:
+    def __next__(self) -> str | tuple[str, str | None]:
         while True:
             if self._iter is None:
                 self._open()
@@ -257,9 +364,17 @@ class HFTextStream:
                 continue
             if not self._keep_row(row):
                 continue
-            text = row.get(self.text_field) or ""
-            if isinstance(text, str) and len(text) >= self.min_chars:
+            text = _nested_get(row, self.text_field) or ""
+            if not (isinstance(text, str) and len(text) >= self.min_chars):
+                continue
+            if not self.return_title:
                 return text
+            title = _nested_get(row, self.title_field) if self.title_field else None
+            if title is None and isinstance(row.get("metadata"), dict):
+                title = row["metadata"].get("title")
+            if not isinstance(title, str):
+                title = None
+            return text, title
 
     def state_dict(self) -> dict:
         return {
@@ -535,14 +650,36 @@ class WeightedMultiSourceStream:
                 stream.load_state_dict(sub)
 
 
+def _maybe_wrap_preprocess(
+    stream: Any,
+    spec: dict,
+    *,
+    name: str,
+    cutoff_year: int,
+) -> Any:
+    pp = spec.get("preprocess")
+    if not preprocess_cfg_enabled(pp if isinstance(pp, dict) else None):
+        return stream
+    assert isinstance(pp, dict)
+    return PreprocessTextStream(stream, pp, cutoff_year=cutoff_year, name=name)
+
+
 def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, Any, float]:
     stype = str(spec.get("type", "")).strip().lower()
     name = str(spec.get("name", stype))
     weight = float(spec.get("weight", 1.0))
     if weight <= 0:
         raise ValueError(f"source {name!r} weight must be > 0")
+    want_preprocess = preprocess_cfg_enabled(
+        spec.get("preprocess") if isinstance(spec.get("preprocess"), dict) else None
+    )
 
     if stype in {"fineweb_edu", "fineweb"}:
+        if want_preprocess:
+            print(
+                f"[data] warning: preprocess on FineWeb source {name!r} is unusual; "
+                f"keeping raw FineWeb is recommended for fluency"
+            )
         dumps = list(spec.get("dumps") or [])
         validate_cutoff_dumps(dumps, cutoff_year)
         yw = spec.get("year_weights") or {}
@@ -561,6 +698,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             min_score=float(min_score) if min_score is not None else None,
             sequential=bool(spec.get("sequential", False)),
         )
+        stream = _maybe_wrap_preprocess(stream, spec, name=name, cutoff_year=cutoff_year)
         return name, stream, weight
 
     if stype == "wikipedia":
@@ -569,10 +707,13 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             config_name=str(spec.get("config_name", "20220301.en")),
             cutoff_year=cutoff_year,
             text_field=str(spec.get("text_field", "text")),
+            title_field=spec.get("title_field", "title"),
             min_chars=int(spec.get("min_chars", 200)),
             seed=seed + int(spec.get("seed_offset", 11)),
             start_offset=int(spec.get("start_offset", 0)),
+            return_title=want_preprocess,
         )
+        stream = _maybe_wrap_preprocess(stream, spec, name=name, cutoff_year=cutoff_year)
         return name, stream, weight
 
     if stype == "hf_text":
@@ -582,6 +723,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             name=spec.get("config_name") or spec.get("subset"),
             split=str(spec.get("split", "train")),
             text_field=str(spec.get("text_field", "text")),
+            title_field=spec.get("title_field"),
             date_field=spec.get("date_field"),
             require_date=bool(spec.get("require_date", False)),
             snapshot_year=spec.get("snapshot_year"),
@@ -589,7 +731,9 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             min_chars=int(spec.get("min_chars", 200)),
             seed=seed + int(spec.get("seed_offset", 22)),
             start_offset=int(spec.get("start_offset", 0)),
+            return_title=want_preprocess,
         )
+        stream = _maybe_wrap_preprocess(stream, spec, name=name, cutoff_year=cutoff_year)
         return name, stream, weight
 
     if stype == "local_text":
@@ -601,6 +745,7 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             seed=seed + int(spec.get("seed_offset", 33)),
             start_offset=int(spec.get("start_offset", 0)),
         )
+        stream = _maybe_wrap_preprocess(stream, spec, name=name, cutoff_year=cutoff_year)
         return name, stream, weight
 
     raise ValueError(
