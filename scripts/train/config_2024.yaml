@@ -6,10 +6,12 @@
 #   2) local cpt.jsonl — already preprocessed + multi-style enriched
 #      wiki + late-2024 ccnews (probe/QA/temporal/…), weight 0.80
 #
-# CPT cycles after ~1 epoch (~32k steps at weight 0.80); FineWeb streams for mass.
+# CPT unique tokens ~1.6B. Shuffled, no-repeat (cycle=false).
+# Per-doc random mix (multisource_docs_per_turn=1): ~80% CPT / ~20% FineWeb.
+# When CPT is exhausted, training continues on FineWeb only.
 #
 # Token budget:
-#   150,000 × 65,536 ≈ 9.83B tokens.
+#   50,000 × 65,536 ≈ 3.28B tokens.
 #
 # Run (from chronollm/):
 #   python scripts/train/train.py --config scripts/train/config_2024.yaml
@@ -33,13 +35,14 @@ validation_dumps:
   - CC-MAIN-2024-10
 
 data:
-  multisource_docs_per_turn: 8192
+  # 1 = pick FineWeb vs CPT randomly each document (by weights).
+  multisource_docs_per_turn: 1
   # false so sample probs follow source weights.
   multisource_sequential: false
   year_weights:
     2024: 1.0
   docs_per_turn: 65536
-  shuffle_buffer_size: 64
+  shuffle_buffer_size: 8192
   min_int_score: 4
   sequential: false
 
@@ -55,11 +58,12 @@ sources:
     year_weights:
       2024: 1.0
     docs_per_turn: 65536
-    shuffle_buffer_size: 64
+    # Larger buffer ⇒ more random FineWeb order within the crawl.
+    shuffle_buffer_size: 8192
     min_int_score: 4
     sequential: false
 
-  # Local pack: shuffled, preprocessed, multi-style enriched (no online rewrite).
+  # Local pack: shuffled once, no repeat until exhausted (then FineWeb-only).
   # Path is relative to chronollm/ working directory.
   - name: cpt_2024
     type: local_text
@@ -67,6 +71,8 @@ sources:
     path: cpt.jsonl
     snapshot_year: 2024
     min_chars: 40
+    shuffle: true
+    cycle: false
 
 skill_mix:
   enabled: true
@@ -168,18 +174,19 @@ train:
   bf16_autocast: true
   tf32: true
 
-  # From-scratch LR (not continue).
+  # From-scratch LR; slightly shorter warmup for 50k schedule.
   learning_rate: 2.0e-4
   weight_decay: 0.1
-  warmup_steps: 3000
+  warmup_steps: 1500
   init_std: 0.02
 
-  # 150,000 * 65,536 ≈ 9.83B tokens.
-  max_steps: 150000
+  # ~1.5 CPT epochs at weight 0.80 (1 epoch ≈ 32k steps).
+  # 50,000 * 65,536 ≈ 3.28B tokens.
+  max_steps: 50000
 
   log_every: 20
-  eval_every: 1500
-  save_every: 1500
+  eval_every: 1000
+  save_every: 1000
   validation_blocks: 64
   validation_micro_batch_size: 16
 

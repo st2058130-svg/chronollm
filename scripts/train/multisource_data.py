@@ -423,6 +423,8 @@ class LocalTextStream:
         min_chars: int = 80,
         seed: int = 42,
         start_offset: int = 0,
+        shuffle: bool = True,
+        cycle: bool = True,
     ):
         self.path = Path(path)
         if not self.path.exists():
@@ -436,20 +438,29 @@ class LocalTextStream:
         self.snapshot_year = snap
         self.min_chars = int(min_chars)
         self.seed = int(seed)
+        self.shuffle = bool(shuffle)
+        self.cycle = bool(cycle)
         docs = self._load_docs(self.path)
         if not docs:
             raise ValueError(
                 f"local_text {self.path} has no usable chunks (min_chars={self.min_chars})"
             )
         self.docs = docs
+        self._rng = random.Random(int(seed) + 91)
+        self._order = list(range(len(self.docs)))
+        if self.shuffle:
+            self._rng.shuffle(self._order)
         self._cycle = 0
-        # Local packs are tiny and cycle; offset is modulo length.
-        self._offset = max(0, int(start_offset)) % len(self.docs)
+        start = max(0, int(start_offset))
+        if self.cycle:
+            self._offset = start % len(self.docs)
+        else:
+            self._offset = min(start, len(self.docs))
         kind = "dir" if self.path.is_dir() else "file"
         print(
             f"[data] local_text {kind}={self.path.resolve()} docs={len(self.docs)} "
             f"snapshot_year={self.snapshot_year} cutoff={self.cutoff_year} "
-            f"start_offset={self._offset}"
+            f"shuffle={self.shuffle} cycle={self.cycle} start_offset={self._offset}"
         )
 
     def _load_docs(self, path: Path) -> list[str]:
@@ -543,18 +554,37 @@ class LocalTextStream:
 
     def __next__(self) -> str:
         if self._offset >= len(self.docs):
+            if not self.cycle:
+                raise StopIteration(
+                    f"local_text exhausted (no cycle): {self.path} "
+                    f"docs={len(self.docs)}"
+                )
             self._cycle += 1
             self._offset = 0
-        text = self.docs[self._offset]
+            if self.shuffle:
+                # New random order each epoch when cycling is enabled.
+                self._order = list(range(len(self.docs)))
+                self._rng.shuffle(self._order)
+                print(
+                    f"[data] local_text reshuffle cycle={self._cycle} "
+                    f"docs={len(self.docs)} path={self.path.name}",
+                    flush=True,
+                )
+        text = self.docs[self._order[self._offset]]
         self._offset += 1
         return text
 
     def state_dict(self) -> dict:
         return {
-            "version": "local_text_v2",
+            "version": "local_text_v3",
             "cycle": self._cycle,
             "offset": self._offset,
             "path": str(self.path),
+            "shuffle": self.shuffle,
+            "cycle_flag": self.cycle,
+            "rng_state": self._rng.getstate(),
+            # Index permutation only (not full text) for resume.
+            "order": list(self._order),
         }
 
     def load_state_dict(self, state: dict) -> None:
@@ -562,6 +592,11 @@ class LocalTextStream:
             raise ValueError("local_text path mismatch")
         self._cycle = int(state.get("cycle", 0))
         self._offset = int(state.get("offset", 0))
+        if state.get("rng_state") is not None:
+            self._rng.setstate(state["rng_state"])
+        saved_order = state.get("order")
+        if isinstance(saved_order, list) and len(saved_order) == len(self.docs):
+            self._order = [int(i) for i in saved_order]
 
 
 class WeightedMultiSourceStream:
@@ -592,6 +627,8 @@ class WeightedMultiSourceStream:
         self._active_idx: int | None = None
         self._remaining = 0
         self._seq_idx = 0
+        self._exhausted = [False] * len(self.streams)
+        self._turns = 0
         pretty = ", ".join(f"{n}:{w:.2f}" for n, w in zip(self.names, self.weights))
         mode = "sequential" if self.sequential else "weighted"
         print(
@@ -602,33 +639,67 @@ class WeightedMultiSourceStream:
     def __iter__(self):
         return self
 
+    def _alive_indices(self) -> list[int]:
+        return [i for i, dead in enumerate(self._exhausted) if not dead]
+
     def _start_turn(self) -> None:
+        alive = self._alive_indices()
+        if not alive:
+            raise StopIteration("all multisource streams exhausted (no cycle)")
         if self.sequential:
-            self._active_idx = self._seq_idx % len(self.streams)
-            self._seq_idx += 1
+            # Advance among alive sources only.
+            for _ in range(len(self.streams)):
+                idx = self._seq_idx % len(self.streams)
+                self._seq_idx += 1
+                if not self._exhausted[idx]:
+                    self._active_idx = idx
+                    break
+            else:
+                raise StopIteration("all multisource streams exhausted (no cycle)")
         else:
-            self._active_idx = self._rng.choices(
-                range(len(self.streams)), weights=self.weights, k=1
-            )[0]
+            weights = [self.weights[i] for i in alive]
+            self._active_idx = self._rng.choices(alive, weights=weights, k=1)[0]
         self._remaining = self.docs_per_turn
-        print(f"[data] multisource turn -> {self.names[self._active_idx]}")
+        self._turns += 1
+        # Avoid log spam when docs_per_turn=1 (per-doc random mix).
+        if self.docs_per_turn > 1 or self._turns <= 3 or self._turns % 10000 == 0:
+            print(f"[data] multisource turn -> {self.names[self._active_idx]}")
 
     def __next__(self) -> str:
-        if self._active_idx is None or self._remaining <= 0:
-            self._start_turn()
-        assert self._active_idx is not None
-        text = next(self.streams[self._active_idx])
-        self._remaining -= 1
-        return text
+        # Retry across sources if one is exhausted mid-turn (no-cycle local packs).
+        for _ in range(len(self.streams) + 2):
+            if self._active_idx is None or self._remaining <= 0:
+                self._start_turn()
+            assert self._active_idx is not None
+            idx = self._active_idx
+            if self._exhausted[idx]:
+                self._remaining = 0
+                continue
+            try:
+                text = next(self.streams[idx])
+            except StopIteration:
+                self._exhausted[idx] = True
+                self._remaining = 0
+                print(
+                    f"[data] multisource source exhausted -> {self.names[idx]} "
+                    f"(continuing with remaining sources)",
+                    flush=True,
+                )
+                continue
+            self._remaining -= 1
+            return text
+        raise StopIteration("all multisource streams exhausted (no cycle)")
 
     def state_dict(self) -> dict:
         return {
-            "version": "multisource_v1",
+            "version": "multisource_v2",
             "rng_state": self._rng.getstate(),
             "active_idx": self._active_idx,
             "remaining": self._remaining,
             "seq_idx": self._seq_idx,
             "sequential": self.sequential,
+            "exhausted": list(self._exhausted),
+            "turns": self._turns,
             "names": list(self.names),
             "streams": [
                 s.state_dict() if hasattr(s, "state_dict") else None for s in self.streams
@@ -636,7 +707,7 @@ class WeightedMultiSourceStream:
         }
 
     def load_state_dict(self, state: dict) -> None:
-        if state.get("version") not in {None, "multisource_v1"}:
+        if state.get("version") not in {None, "multisource_v1", "multisource_v2"}:
             raise ValueError(f"Unsupported multisource state version: {state.get('version')}")
         if state.get("names") not in {None, self.names} and state.get("names") != self.names:
             raise ValueError("multisource source name list mismatch")
@@ -644,6 +715,10 @@ class WeightedMultiSourceStream:
         self._active_idx = state.get("active_idx")
         self._remaining = int(state.get("remaining", 0))
         self._seq_idx = int(state.get("seq_idx", 0))
+        saved_ex = state.get("exhausted")
+        if isinstance(saved_ex, list) and len(saved_ex) == len(self._exhausted):
+            self._exhausted = [bool(x) for x in saved_ex]
+        self._turns = int(state.get("turns", 0))
         saved = state.get("streams") or []
         for stream, sub in zip(self.streams, saved):
             if sub is not None and hasattr(stream, "load_state_dict"):
@@ -744,6 +819,8 @@ def _build_one_source(spec: dict, *, cutoff_year: int, seed: int) -> tuple[str, 
             min_chars=int(spec.get("min_chars", 80)),
             seed=seed + int(spec.get("seed_offset", 33)),
             start_offset=int(spec.get("start_offset", 0)),
+            shuffle=bool(spec.get("shuffle", True)),
+            cycle=bool(spec.get("cycle", True)),
         )
         stream = _maybe_wrap_preprocess(stream, spec, name=name, cutoff_year=cutoff_year)
         return name, stream, weight
