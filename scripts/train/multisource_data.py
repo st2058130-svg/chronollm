@@ -500,6 +500,13 @@ class LocalTextStream:
             val = obj.get(key)
             if isinstance(val, str) and val.strip():
                 return val.strip()
+        # SFT-style rows: {"prompt": "...", "completion": "..."}.
+        prompt = obj.get("prompt")
+        completion = obj.get("completion")
+        if isinstance(prompt, str) and isinstance(completion, str):
+            joined = f"{prompt.strip()}\n{completion.strip()}".strip()
+            if joined:
+                return joined
         # Common nested shapes: {"title": "...", "abstract": "..."}
         parts = [
             str(obj[k]).strip()

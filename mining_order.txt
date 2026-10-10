@@ -96,3 +96,6 @@ python scripts/train/watch_upload_best.py \
 python scripts/train/compare_models.py model-a model-b
 python scripts/train/compare_models.py model-a model-b --n-per-category 5
 python scripts/train/compare_models.py model-a model-b --bundled-prompts
+
+Google drive download
+gdown "PASTE_YOUR_GOOGLE_DRIVE_LINK_HERE" -O /workspace/your-filename.ext

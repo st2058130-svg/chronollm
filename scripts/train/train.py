@@ -54,7 +54,10 @@ import sn38.architectures  # noqa: F401
 from sn38.architectures.nanochrono.configuration_nanochrono import NanochronoConfig
 from sn38.architectures.nanochrono.modeling_nanochrono import NanochronoForCausalLM
 from scripts.train.data import build_packed_stream, build_text_stream, validate_cutoff_dumps
-from scripts.train.multisource_data import build_multisource_packed_stream
+from scripts.train.multisource_data import (
+    build_multisource_packed_stream,
+    build_multisource_text_stream,
+)
 from scripts.train.env import load_train_env
 
 DEFAULT_MAX_PARAMETERS = 2_200_000_000
@@ -171,17 +174,20 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
     unk = str(tc.get("unk_token", "<|unk|>"))
 
     # Optional smaller crawl set for tokenizer only (avoids opening all train dumps in RAM).
+    # Local-only configs may omit FineWeb dumps and train the tokenizer from sources:.
     tok_dumps = list(tc.get("dumps") or dumps)
-    validate_cutoff_dumps(tok_dumps, int(cfg["year"]))
-    if set(tok_dumps) - set(dumps):
-        raise SystemExit(
-            f"[error] tokenizer.dumps must be a subset of training dumps: "
-            f"{sorted(set(tok_dumps) - set(dumps))}"
-        )
+    if tok_dumps:
+        validate_cutoff_dumps(tok_dumps, int(cfg["year"]))
+        if dumps and set(tok_dumps) - set(dumps):
+            raise SystemExit(
+                f"[error] tokenizer.dumps must be a subset of training dumps: "
+                f"{sorted(set(tok_dumps) - set(dumps))}"
+            )
 
     print(
         f"[tok] training cutoff-safe byte-level BPE vocab={vocab_size:,} "
-        f"docs={train_documents:,} dumps={len(tok_dumps)} -> {save_dir.resolve()}"
+        f"docs={train_documents:,} dumps={len(tok_dumps)} "
+        f"sources={bool(cfg.get('sources'))} -> {save_dir.resolve()}"
     )
     opts = _data_stream_options(cfg, enable_skill_mix=False)
     # Tokenizer build can use a smaller stickiness / ignore score floor for speed.
@@ -192,13 +198,26 @@ def build_or_train_cutoff_tokenizer(cfg: dict, dumps: list[str], default_dir: Pa
     if tc.get("disable_score_filter"):
         opts["min_int_score"] = None
         opts["min_score"] = None
-    text_stream = build_text_stream(
-        tok_dumps,
-        cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
-        cutoff_year=int(cfg["year"]),
-        seed=seed,
-        **opts,
-    )
+    if tok_dumps:
+        text_stream = build_text_stream(
+            tok_dumps,
+            cfg.get("dataset", "HuggingFaceFW/fineweb-edu"),
+            cutoff_year=int(cfg["year"]),
+            seed=seed,
+            **opts,
+        )
+    elif cfg.get("sources"):
+        text_stream = build_multisource_text_stream(
+            cfg,
+            cutoff_year=int(cfg["year"]),
+            seed=seed,
+            skill_mix=None,
+        )
+    else:
+        raise SystemExit(
+            "[error] tokenizer training needs FineWeb dumps: or local sources:; "
+            f"or place a trained tokenizer at {save_dir}"
+        )
 
     def limited_texts():
         for text in itertools.islice(text_stream, train_documents):
@@ -697,8 +716,12 @@ def main():
     dumps = list(cfg.get("dumps") or [])
     if not dumps and cfg.get("sources"):
         dumps = _dumps_from_sources(cfg)
-    if not dumps:
-        raise SystemExit("[error] config needs dumps: and/or fineweb sources with dumps")
+    # Local-only multisource (e.g. jsonl packs) may omit FineWeb dumps.
+    if not dumps and not cfg.get("sources"):
+        raise SystemExit(
+            "[error] config needs dumps: and/or sources: "
+            "(FineWeb dumps and/or local_text / hf_text / wikipedia)"
+        )
     val_dumps = list(cfg.get("validation_dumps", []))
     model_cfg = dict(cfg.get("model", {}))
     max_parameters = int(cfg.get("max_parameters", DEFAULT_MAX_PARAMETERS))
@@ -732,9 +755,10 @@ def main():
     if args.resume and (args.init_from or cfg.get("init_from")):
         raise SystemExit("[error] use only one of --resume and --init-from / config init_from")
 
-    if set(dumps) & set(val_dumps):
+    if dumps and set(dumps) & set(val_dumps):
         raise SystemExit(f"[error] train/validation overlap: {sorted(set(dumps)&set(val_dumps))}")
-    validate_cutoff_dumps(dumps, int(cfg["year"]))
+    if dumps:
+        validate_cutoff_dumps(dumps, int(cfg["year"]))
     if val_dumps:
         validate_cutoff_dumps(val_dumps, int(cfg["year"]))
 

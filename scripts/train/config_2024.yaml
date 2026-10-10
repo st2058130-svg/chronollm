@@ -1,22 +1,19 @@
-# SN38 2024 cutoff — FROM SCRATCH on FineWeb-Edu + local CPT pack
+# SN38 2024 cutoff — FROM SCRATCH on local JSONL packs only
 #
-# No init_from / no prior-year weights. Trains a new 32K tokenizer + Nanochrono
-# from random init on:
-#   1) FineWeb-Edu CC-MAIN-2024-22 — LM fluency (RAW, weight 0.20)
-#   2) local cpt.jsonl — already preprocessed + multi-style enriched
-#      wiki + late-2024 ccnews (probe/QA/temporal/…), weight 0.80
+# No FineWeb streaming. Trains Nanochrono from random init on:
+#   1) stanford.jsonl  — early-2024 Stanford CC-News pack (weight 0.45)
+#   2) cpt.jsonl       — enriched late-2024 news + wiki styles (weight 0.50)
+#   3) sft.jsonl       — skill/QA style prompt+completion (weight 0.05)
 #
-# CPT unique tokens ~1.6B. Shuffled, no-repeat (cycle=false).
-# Per-doc random mix (multisource_docs_per_turn=1): ~80% CPT / ~20% FineWeb.
-# When CPT is exhausted, training continues on FineWeb only.
+# Per-doc random mix; each local pack shuffled once, no repeat (cycle=false).
+# When a pack is exhausted, remaining sources keep feeding.
 #
-# Token budget:
-#   50,000 × 65,536 ≈ 3.28B tokens.
+# Tokenizer: train_or_load from local sources if missing, else reuse path.
 #
 # Run (from chronollm/):
 #   python scripts/train/train.py --config scripts/train/config_2024.yaml
 #
-# Resume a crashed run:
+# Resume:
 #   python scripts/train/train.py --config scripts/train/config_2024.yaml \
 #       --resume checkpoints/nanochrono-2024/train-latest
 
@@ -25,50 +22,44 @@ output_dir: runs/nanochrono-2024
 checkpoint_dir: checkpoints/nanochrono-2024
 max_parameters: 2200000000
 
-dataset: HuggingFaceFW/fineweb-edu
-
-dumps:
-  - CC-MAIN-2024-22
-
-# Held-out earlier 2024 crawl for val (not used in train).
-validation_dumps:
-  - CC-MAIN-2024-10
+# No FineWeb dumps (local-only). Optional held-out FineWeb val left empty.
+dumps: []
+validation_dumps: []
 
 data:
-  # 1 = pick FineWeb vs CPT randomly each document (by weights).
+  # Random source pick every document by weights.
   multisource_docs_per_turn: 1
-  # false so sample probs follow source weights.
   multisource_sequential: false
   year_weights:
     2024: 1.0
   docs_per_turn: 65536
-  shuffle_buffer_size: 8192
-  min_int_score: 4
+  shuffle_buffer_size: 64
   sequential: false
 
 # Weights sum=1.0.
-# Known-first: local CPT (enriched dated facts) heavy; FineWeb for fluency.
 sources:
-  - name: fineweb_edu_2024_22
-    type: fineweb_edu
-    weight: 0.20
-    dataset: HuggingFaceFW/fineweb-edu
-    dumps:
-      - CC-MAIN-2024-22
-    year_weights:
-      2024: 1.0
-    docs_per_turn: 65536
-    # Larger buffer ⇒ more random FineWeb order within the crawl.
-    shuffle_buffer_size: 8192
-    min_int_score: 4
-    sequential: false
+  - name: stanford_2024
+    type: local_text
+    weight: 0.2
+    path: stanford.jsonl
+    snapshot_year: 2024
+    min_chars: 40
+    shuffle: true
+    cycle: false
 
-  # Local pack: shuffled once, no repeat until exhausted (then FineWeb-only).
-  # Path is relative to chronollm/ working directory.
   - name: cpt_2024
     type: local_text
-    weight: 0.80
+    weight: 0.75
     path: cpt.jsonl
+    snapshot_year: 2024
+    min_chars: 40
+    shuffle: true
+    cycle: false
+
+  - name: sft_2024
+    type: local_text
+    weight: 0.05
+    path: sft.jsonl
     snapshot_year: 2024
     min_chars: 40
     shuffle: true
@@ -95,7 +86,7 @@ skill_mix:
     paraphrase_detection: 1.0
     word_sense: 1.1
 
-# Train a fresh cutoff-safe 32K BPE from CC-MAIN-2024-22 only.
+# Train from local packs if missing; otherwise load.
 tokenizer:
   mode: train_or_load
   path: runs/nanochrono-2024/tokenizer-32768
@@ -103,9 +94,6 @@ tokenizer:
   train_documents: 15000
   shuffle_buffer_size: 64
   docs_per_turn: 2048
-  disable_score_filter: true
-  dumps:
-    - CC-MAIN-2024-22
   max_chars_per_document: 16384
   min_frequency: 2
   seed: 17024
@@ -174,20 +162,19 @@ train:
   bf16_autocast: true
   tf32: true
 
-  # From-scratch LR; slightly shorter warmup for 50k schedule.
   learning_rate: 2.0e-4
   weight_decay: 0.1
   warmup_steps: 1500
   init_std: 0.02
 
-  # ~1.5 CPT epochs at weight 0.80 (1 epoch ≈ 32k steps).
-  # 50,000 * 65,536 ≈ 3.28B tokens.
+  # Local packs are smaller than FineWeb; keep a moderate schedule.
+  # 50,000 * 65,536 ≈ 3.28B tokens (packs cycle-disable ⇒ may end early on sources).
   max_steps: 50000
 
   log_every: 20
   eval_every: 1000
   save_every: 1000
-  validation_blocks: 64
+  validation_blocks: 0
   validation_micro_batch_size: 16
 
   seed: 202451
@@ -201,8 +188,6 @@ smoke:
   grad_accum: 1
   seq_len: 128
   tokenizer_name: gpt2
-  dumps:
-    - CC-MAIN-2024-22
   model:
     hidden_size: 256
     intermediate_size: 512
