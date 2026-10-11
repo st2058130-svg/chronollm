@@ -716,8 +716,12 @@ class WeightedMultiSourceStream:
     def load_state_dict(self, state: dict) -> None:
         if state.get("version") not in {None, "multisource_v1", "multisource_v2"}:
             raise ValueError(f"Unsupported multisource state version: {state.get('version')}")
-        if state.get("names") not in {None, self.names} and state.get("names") != self.names:
-            raise ValueError("multisource source name list mismatch")
+        saved_names = state.get("names")
+        if saved_names is not None and list(saved_names) != list(self.names):
+            raise ValueError(
+                f"multisource source name list mismatch: "
+                f"ckpt={list(saved_names)} config={list(self.names)}"
+            )
         self._rng.setstate(state["rng_state"])
         self._active_idx = state.get("active_idx")
         self._remaining = int(state.get("remaining", 0))
@@ -725,6 +729,10 @@ class WeightedMultiSourceStream:
         saved_ex = state.get("exhausted")
         if isinstance(saved_ex, list) and len(saved_ex) == len(self._exhausted):
             self._exhausted = [bool(x) for x in saved_ex]
+        # If sources now allow cycling, clear exhausted flags from older no-cycle runs.
+        for i, stream in enumerate(self.streams):
+            if bool(getattr(stream, "cycle", True)):
+                self._exhausted[i] = False
         self._turns = int(state.get("turns", 0))
         saved = state.get("streams") or []
         for stream, sub in zip(self.streams, saved):

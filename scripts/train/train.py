@@ -900,16 +900,36 @@ def main():
 
     for step in range(start_step, max_steps + 1):
         step_loss = 0.0
-        for _ in range(grad_accum):
-            batch = [next(data_iter)["input_ids"] for _ in range(micro_bs)]
-            sequences_consumed += micro_bs
-            input_ids = torch.stack(batch, dim=0).to(device)
-            with autocast_context(device, use_bf16):
-                out = model(input_ids=input_ids, labels=input_ids, use_cache=False)
-                raw_loss = out.loss
-            (raw_loss / grad_accum).backward()
-            step_loss += float(raw_loss.detach().item()) / grad_accum
-            tokens_seen += input_ids.numel()
+        try:
+            for _ in range(grad_accum):
+                batch = [next(data_iter)["input_ids"] for _ in range(micro_bs)]
+                sequences_consumed += micro_bs
+                input_ids = torch.stack(batch, dim=0).to(device)
+                with autocast_context(device, use_bf16):
+                    out = model(input_ids=input_ids, labels=input_ids, use_cache=False)
+                    raw_loss = out.loss
+                (raw_loss / grad_accum).backward()
+                step_loss += float(raw_loss.detach().item()) / grad_accum
+                tokens_seen += input_ids.numel()
+        except StopIteration:
+            print(
+                f"[train] data streams exhausted at step {step}/{max_steps} "
+                f"(set sources cycle: true to continue). Stopping early."
+            )
+            opt.zero_grad(set_to_none=True)
+            last_ok = step - 1
+            if last_ok >= start_step:
+                save_checkpoint(
+                    model, tokenizer, ckpt_dir / "train-latest", last_ok, opt, sched, packed,
+                    sequences_consumed, tokens_seen, best_val_loss,
+                )
+                save_compact_inference_model(
+                    model, tokenizer, ckpt_dir / "latest", last_ok,
+                    None if not math.isfinite(best_val_loss) else best_val_loss,
+                    export_mode=export_mode,
+                )
+                max_steps = last_ok
+            break
 
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         if not torch.isfinite(grad_norm):

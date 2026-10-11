@@ -31,7 +31,7 @@ training hours≈4.92×10**9/(tok/s×3600)
 cd /workspace/chronollm
 pip install -r scripts/train/requirements.txt
 
-python scripts/train/train.py --config scripts/train/config_2023_cc50_continue.yaml \
+python scripts/train/train.py --config scripts/train/config_2024.yaml \
   --init-from checkpoints/nanochrono-2022
 
 # Multi-source 2022 (FineWeb-Edu + Wikipedia 20220301 + FineWeb general):
@@ -44,7 +44,7 @@ hf download vadimyakob/chrono-2023-mid-4 \
     --local-dir checkpoints/nanochrono-2023/latest
 
 Upload order;
-hf upload vadimyakob/chrono-2024-a-7500 checkpoints/nanochrono-2024/step-7500 --repo-type model
+hf upload vadimyakob/chrono-2024-c-2000 checkpoints/nanochrono-2024/step-2000 --repo-type model
 
 # Auto-upload each new best/ to a NEW numbered HF repo (2nd terminal):
 # export HF_TOKEN=hf_xxx
@@ -83,14 +83,14 @@ python scripts/train/train.py --config scripts/train/config_2023_wiki_ft.yaml \
   export HF_HOME=/workspace/hf-cache
 
 leak test: 
-python scripts/train/prompt_leak_test.py vadimyakob/chrono-2024-a-1 \
+python scripts/train/prompt_leak_test.py vadimyakob/chrono-2024-c-1 \
 --year 2024 \
 --prompts scripts/train/benchmark_data/example_prompts_2024.json
 
 export HF_TOKEN=hf_xxx
 python scripts/train/watch_upload_best.py \
   --dir checkpoints/nanochrono-2024/latest \
-  --repo-prefix vadimyakob/chrono-2024-a \
+  --repo-prefix vadimyakob/chrono-2024-c \
   --start 0
 
 python scripts/train/compare_models.py model-a model-b
@@ -99,3 +99,5 @@ python scripts/train/compare_models.py model-a model-b --bundled-prompts
 
 Google drive download
 gdown "PASTE_YOUR_GOOGLE_DRIVE_LINK_HERE" -O /workspace/your-filename.ext
+
+hf download vadimyakob/probe_cc_news   cpt.jsonl   --repo-type dataset   --local-dir "/workspace/chronollm"

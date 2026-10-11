@@ -1,14 +1,12 @@
-# SN38 2024 cutoff — FROM SCRATCH on local JSONL packs only
+# SN38 2024 cutoff — FROM SCRATCH on local CPT + FineWeb-Edu
 #
-# No FineWeb streaming. Trains Nanochrono from random init on:
-#   1) stanford.jsonl  — early-2024 Stanford CC-News pack (weight 0.45)
-#   2) cpt.jsonl       — enriched late-2024 news + wiki styles (weight 0.50)
-#   3) sft.jsonl       — skill/QA style prompt+completion (weight 0.05)
+# Trains Nanochrono from random init on:
+#   1) cpt.jsonl                 — enriched 2024 news + wiki styles (weight 0.80)
+#   2) FineWeb-Edu CC-MAIN-2024-22 — raw LM fluency (weight 0.20)
 #
-# Per-doc random mix; each local pack shuffled once, no repeat (cycle=false).
-# When a pack is exhausted, remaining sources keep feeding.
+# Per-doc random mix. CPT is shuffled and reshuffled each pass (cycle=true).
 #
-# Tokenizer: train_or_load from local sources if missing, else reuse path.
+# Tokenizer: train_or_load; if missing, trained from CC-MAIN-2024-22.
 #
 # Run (from chronollm/):
 #   python scripts/train/train.py --config scripts/train/config_2024.yaml
@@ -22,9 +20,14 @@ output_dir: runs/nanochrono-2024
 checkpoint_dir: checkpoints/nanochrono-2024
 max_parameters: 2200000000
 
-# No FineWeb dumps (local-only). Optional held-out FineWeb val left empty.
-dumps: []
-validation_dumps: []
+dataset: HuggingFaceFW/fineweb-edu
+
+dumps:
+  - CC-MAIN-2024-22
+
+# Held-out earlier 2024 crawl for validation (not used in train).
+validation_dumps:
+  - CC-MAIN-2024-10
 
 data:
   # Random source pick every document by weights.
@@ -33,37 +36,33 @@ data:
   year_weights:
     2024: 1.0
   docs_per_turn: 65536
-  shuffle_buffer_size: 64
+  shuffle_buffer_size: 8192
+  min_int_score: 4
   sequential: false
 
 # Weights sum=1.0.
 sources:
-  - name: stanford_2024
-    type: local_text
-    weight: 0.2
-    path: stanford.jsonl
-    snapshot_year: 2024
-    min_chars: 40
-    shuffle: true
-    cycle: false
-
   - name: cpt_2024
     type: local_text
-    weight: 0.75
+    weight: 0.80
     path: cpt.jsonl
     snapshot_year: 2024
     min_chars: 40
     shuffle: true
-    cycle: false
+    cycle: true
 
-  - name: sft_2024
-    type: local_text
-    weight: 0.05
-    path: sft.jsonl
-    snapshot_year: 2024
-    min_chars: 40
-    shuffle: true
-    cycle: false
+  - name: fineweb_edu_2024_22
+    type: fineweb_edu
+    weight: 0.20
+    dataset: HuggingFaceFW/fineweb-edu
+    dumps:
+      - CC-MAIN-2024-22
+    year_weights:
+      2024: 1.0
+    docs_per_turn: 65536
+    shuffle_buffer_size: 8192
+    min_int_score: 4
+    sequential: false
 
 skill_mix:
   enabled: true
@@ -86,7 +85,7 @@ skill_mix:
     paraphrase_detection: 1.0
     word_sense: 1.1
 
-# Train from local packs if missing; otherwise load.
+# Load existing tokenizer if present; otherwise train from CC-MAIN-2024-22.
 tokenizer:
   mode: train_or_load
   path: runs/nanochrono-2024/tokenizer-32768
@@ -94,6 +93,9 @@ tokenizer:
   train_documents: 15000
   shuffle_buffer_size: 64
   docs_per_turn: 2048
+  disable_score_filter: true
+  dumps:
+    - CC-MAIN-2024-22
   max_chars_per_document: 16384
   min_frequency: 2
   seed: 17024
@@ -167,14 +169,13 @@ train:
   warmup_steps: 1500
   init_std: 0.02
 
-  # Local packs are smaller than FineWeb; keep a moderate schedule.
-  # 50,000 * 65,536 ≈ 3.28B tokens (packs cycle-disable ⇒ may end early on sources).
-  max_steps: 50000
+  # 50,000 * 65,536 ≈ 3.28B tokens; CPT (~2.6B at 0.8) ≈ 1.6 epochs.
+  max_steps: 30000
 
   log_every: 20
   eval_every: 1000
   save_every: 1000
-  validation_blocks: 0
+  validation_blocks: 64
   validation_micro_batch_size: 16
 
   seed: 202451
